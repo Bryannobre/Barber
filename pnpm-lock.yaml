@@ -4,9 +4,6 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-overrides:
-  '@supabase/supabase-js>@supabase/gotrue-js': 2.61.0
-
 importers:
 
   .:
