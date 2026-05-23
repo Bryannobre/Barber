@@ -70,15 +70,9 @@ function formatSource(source: string) {
   return source;
 }
 
-/** Descrição em uma linha: Serviço • Cliente • Profissional (agendamentos) ou texto do registro. */
-function getDescriptionDisplay(r: FinancialRecord) {
+function getServiceDisplay(r: FinancialRecord) {
   if (r.source === "appointment") {
-    const parts: string[] = [
-      r.service_name_snapshot ?? "",
-      r.client_name_snapshot ?? "",
-      r.professional_name_snapshot ?? "",
-    ].filter(Boolean);
-    return parts.length > 0 ? parts.join(" • ") : r.description ?? "—";
+    return r.service_name_snapshot ?? r.description ?? "Atendimento";
   }
   return r.description ?? "—";
 }
@@ -195,6 +189,7 @@ function ManualEntryModal({
 
 const AppFinancial = () => {
   const { currentCompany } = useTenant();
+  const { user } = useAuth();
   const companyId = currentCompany?.id ?? "";
   const [periodKey, setPeriodKey] = useState<PeriodKey>("today");
   const [customStart, setCustomStart] = useState("");
@@ -209,21 +204,32 @@ const AppFinancial = () => {
     customEnd || undefined
   );
 
+  const syncAndLoad = async () => {
+    if (companyId) {
+      await financialService.syncAppointmentRevenue(companyId, user?.id);
+    }
+    return financialService.listByCompany(companyId, {
+      startDate,
+      endDate,
+      validOnly: true,
+    });
+  };
+
   const { data: stats, isError: statsError } = useQuery({
     queryKey: ["financial", "stats", companyId, startDate, endDate],
-    queryFn: () => financialService.getStats(companyId, { startDate, endDate }),
+    queryFn: async () => {
+      if (companyId) {
+        await financialService.syncAppointmentRevenue(companyId, user?.id);
+      }
+      return financialService.getStats(companyId, { startDate, endDate });
+    },
     enabled: !!companyId,
     retry: false,
   });
 
   const { data: recordsData, isError: recordsError } = useQuery({
     queryKey: ["financial", "records", companyId, startDate, endDate],
-    queryFn: () =>
-      financialService.listByCompany(companyId, {
-        startDate,
-        endDate,
-        validOnly: true,
-      }),
+    queryFn: syncAndLoad,
     enabled: !!companyId,
     retry: false,
   });
@@ -404,11 +410,11 @@ const AppFinancial = () => {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Descrição</TableHead>
-              <TableHead>Origem</TableHead>
-              <TableHead className="hidden md:table-cell">Cliente</TableHead>
-              <TableHead className="hidden md:table-cell">Profissional</TableHead>
+              <TableHead>Serviço / descrição</TableHead>
+              <TableHead>Cliente</TableHead>
+              <TableHead>Profissional</TableHead>
               <TableHead>Data</TableHead>
+              <TableHead className="hidden sm:table-cell">Origem</TableHead>
               <TableHead className="text-right">Valor</TableHead>
             </TableRow>
           </TableHeader>
@@ -417,31 +423,34 @@ const AppFinancial = () => {
               <TableRow>
                 <TableCell colSpan={6} className="text-center text-muted-foreground py-12">
                   {records.length === 0
-                    ? "Nenhuma movimentação no período. Receitas são geradas automaticamente quando um agendamento é marcado como \"Concluído\". Use os botões acima para registrar entradas ou saídas manuais."
+                    ? "Nenhuma movimentação no período. Receitas de cortes entram aqui quando o agendamento está \"Concluído\" e o horário do atendimento já passou. Use os botões acima para entradas ou saídas manuais."
                     : "Nenhum registro com essa origem no período."}
                 </TableCell>
               </TableRow>
             ) : (
               filteredRecords.map((r) => (
                 <TableRow key={r.id}>
-                  <TableCell className="font-medium align-top">
-                    {getDescriptionDisplay(r)}
+                  <TableCell className="font-medium align-top max-w-[200px]">
+                    <span className="line-clamp-2">{getServiceDisplay(r)}</span>
                   </TableCell>
-                  <TableCell className="text-muted-foreground align-top">
+                  <TableCell className="align-top">
+                    {r.source === "appointment"
+                      ? r.client_name_snapshot ?? "—"
+                      : "—"}
+                  </TableCell>
+                  <TableCell className="align-top">
+                    {r.source === "appointment"
+                      ? r.professional_name_snapshot ?? "—"
+                      : "—"}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground align-top whitespace-nowrap tabular-nums">
+                    {format(new Date(r.created_at), "dd/MM/yyyy", { locale: ptBR })}
+                    <span className="block text-xs opacity-80">
+                      {format(new Date(r.created_at), "HH:mm", { locale: ptBR })}
+                    </span>
+                  </TableCell>
+                  <TableCell className="hidden sm:table-cell text-muted-foreground align-top text-xs">
                     {formatSource(r.source)}
-                  </TableCell>
-                  <TableCell className="hidden md:table-cell text-muted-foreground align-top">
-                    {r.source === "appointment" && r.client_name_snapshot
-                      ? r.client_name_snapshot
-                      : "—"}
-                  </TableCell>
-                  <TableCell className="hidden md:table-cell text-muted-foreground align-top">
-                    {r.source === "appointment" && r.professional_name_snapshot
-                      ? r.professional_name_snapshot
-                      : "—"}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground align-top whitespace-nowrap">
-                    {format(new Date(r.created_at), "dd/MM/yyyy HH:mm", { locale: ptBR })}
                   </TableCell>
                   <TableCell
                     className={cn(

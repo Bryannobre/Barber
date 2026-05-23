@@ -5,7 +5,11 @@ import {
   requireUuid,
 } from "@/lib/companyScope";
 import { BusinessRuleError } from "@/lib/businessRules";
-import type { FinancialRecord } from "@/types/database.types";
+import {
+  getAppointmentEndDate,
+  isAppointmentEligibleForFinancial,
+} from "@/lib/appointmentFinancial";
+import type { Appointment, FinancialRecord, Service } from "@/types/database.types";
 
 export interface CreateFromAppointmentParams {
   company_id: string;
@@ -15,6 +19,8 @@ export interface CreateFromAppointmentParams {
   client_name_snapshot: string;
   amount: number;
   created_by: string;
+  /** Data/hora do atendimento (fim do serviço) — usada como data do lançamento */
+  occurred_at?: string;
 }
 
 export interface FinancialStats {
@@ -69,11 +75,134 @@ export const financialService = {
         client_name_snapshot: params.client_name_snapshot,
         professional_name_snapshot: params.professional_name_snapshot,
         created_by: params.created_by,
+        created_at: params.occurred_at ?? new Date().toISOString(),
         is_valid: true,
       })
       .select()
       .single();
     return { data: data as FinancialRecord, error };
+  },
+
+  /**
+   * Cria receita de um agendamento se: concluído, horário já passou e ainda não existe lançamento válido.
+   */
+  async tryCreateFinancialFromAppointment(
+    appointmentId: string,
+    createdBy?: string | null
+  ): Promise<{ created: boolean; error: unknown }> {
+    requireUuid(appointmentId);
+    const { data: apt, error: aptErr } = await supabase
+      .from("appointments")
+      .select(
+        "id, company_id, professional_id, client_name, date, start_time, duration_minutes, status, ends_at, starts_at, created_by"
+      )
+      .eq("id", appointmentId)
+      .single();
+
+    if (aptErr || !apt) return { created: false, error: aptErr };
+
+    const appointment = apt as Appointment;
+    if (!isAppointmentEligibleForFinancial(appointment)) {
+      return { created: false, error: null };
+    }
+
+    const hasValid = await this.hasValidRecordForAppointment(appointmentId);
+    if (hasValid) return { created: false, error: null };
+
+    const { data: svcLinks } = await supabase
+      .from("appointment_services")
+      .select("service_id")
+      .eq("appointment_id", appointmentId);
+    const serviceIds = (svcLinks ?? []).map((s) => s.service_id);
+
+    let services: (Service & { price?: number })[] = [];
+    if (serviceIds.length > 0) {
+      const { data: servicesData } = await supabase
+        .from("services")
+        .select("id, name, price")
+        .in("id", serviceIds);
+      services = (servicesData ?? []) as (Service & { price?: number })[];
+    }
+
+    const { data: profData } = await supabase
+      .from("professionals")
+      .select("name")
+      .eq("id", appointment.professional_id)
+      .single();
+
+    const professionalName = (profData as { name?: string } | null)?.name ?? "—";
+    const clientName = appointment.client_name ?? "Cliente";
+    const serviceNames =
+      services.map((s) => s.name).filter(Boolean).join(" + ") || "Atendimento";
+    const amount = services.reduce((sum, s) => sum + (Number(s.price) ?? 0), 0);
+
+    if (amount <= 0) {
+      return { created: false, error: new Error("Serviço sem valor cadastrado.") };
+    }
+
+    const occurredAt = getAppointmentEndDate(appointment).toISOString();
+    const { error } = await this.createFromAppointment({
+      company_id: appointment.company_id,
+      appointment_id: appointmentId,
+      service_name_snapshot: serviceNames,
+      professional_name_snapshot: professionalName,
+      client_name_snapshot: clientName,
+      amount,
+      created_by: createdBy ?? appointment.created_by ?? "",
+      occurred_at: occurredAt,
+    });
+
+    return { created: !error, error };
+  },
+
+  /**
+   * Sincroniza receitas de agendamentos concluídos cujo horário já passou.
+   * Invalida lançamentos antecipados (concluído antes do fim do horário).
+   */
+  async syncAppointmentRevenue(companyId: string, createdBy?: string | null) {
+    requireCompanyId(companyId);
+    const { data: validAppointmentRecords, error: listErr } = await supabase
+      .from("financial_records")
+      .select("id, appointment_id")
+      .eq("company_id", companyId)
+      .eq("source", "appointment")
+      .eq("is_valid", true)
+      .not("appointment_id", "is", null);
+
+    if (listErr) return { synced: 0, error: listErr };
+
+    for (const rec of validAppointmentRecords ?? []) {
+      if (!rec.appointment_id) continue;
+      const { data: apt } = await supabase
+        .from("appointments")
+        .select("status, date, start_time, duration_minutes, ends_at, starts_at")
+        .eq("id", rec.appointment_id)
+        .single();
+      if (!apt || !isAppointmentEligibleForFinancial(apt as Appointment)) {
+        await this.invalidateByAppointmentId(rec.appointment_id);
+      }
+    }
+
+    const { data: completedRows, error: aptErr } = await supabase
+      .from("appointments")
+      .select("id, status, date, start_time, duration_minutes, ends_at, starts_at")
+      .eq("company_id", companyId)
+      .eq("status", "completed");
+
+    if (aptErr) return { synced: 0, error: aptErr };
+
+    let synced = 0;
+    for (const row of completedRows ?? []) {
+      if (!isAppointmentEligibleForFinancial(row as Appointment)) continue;
+      const { created, error } = await this.tryCreateFinancialFromAppointment(
+        row.id,
+        createdBy
+      );
+      if (error) return { synced, error };
+      if (created) synced += 1;
+    }
+
+    return { synced, error: null };
   },
 
   /** Despesa: compra de produto (entrada de estoque com preço de custo). */

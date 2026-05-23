@@ -2,6 +2,7 @@ import type { Appointment } from "@/types/database.types";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import {
+  CALENDAR_TIMELINE_PAD_Y,
   getEventLayout,
   getMinutesFromMidnight,
   parseAppointmentEnd,
@@ -13,6 +14,7 @@ interface EventBlockProps {
   professionalName: string;
   pixelsPerMinute: number;
   dayStartMinutes: number;
+  timelinePadY?: number;
   onClick: (appointmentId: string) => void;
 }
 
@@ -30,13 +32,20 @@ export function EventBlock({
   professionalName,
   pixelsPerMinute,
   dayStartMinutes,
+  timelinePadY = CALENDAR_TIMELINE_PAD_Y,
   onClick,
 }: EventBlockProps) {
   const start = parseAppointmentStart(appointment);
   const end = parseAppointmentEnd(appointment);
   const startMinutes = getMinutesFromMidnight(start);
   const endMinutes = getMinutesFromMidnight(end);
-  const { top, height } = getEventLayout(startMinutes, endMinutes, pixelsPerMinute, dayStartMinutes);
+  const { top, height } = getEventLayout(
+    startMinutes,
+    endMinutes,
+    pixelsPerMinute,
+    dayStartMinutes,
+    timelinePadY
+  );
   const timeLabel = `${format(start, "HH:mm")} - ${format(end, "HH:mm")}`;
   const statusClass = STATUS_STYLES[appointment.status] ?? "bg-muted text-foreground border-border";
 

@@ -3,6 +3,9 @@ import { format } from "date-fns";
 export const PIXELS_PER_MINUTE = 2;
 export const MIN_EVENT_HEIGHT = 24;
 export const CLICK_ROUNDING_MINUTES = 15;
+/** Espaço vertical para rótulos de hora não serem cortados no scroll */
+export const CALENDAR_TIMELINE_PAD_Y = 16;
+export const CALENDAR_HEADER_HEIGHT_PX = 48;
 
 export interface CalendarAppointmentTime {
   date: string;
@@ -43,11 +46,12 @@ export function getEventLayout(
   startMinutes: number,
   endMinutes: number,
   pixelsPerMinute: number,
-  dayStartMinutes: number
+  dayStartMinutes: number,
+  timelinePadY: number = CALENDAR_TIMELINE_PAD_Y
 ) {
   const duration = Math.max(0, endMinutes - startMinutes);
   return {
-    top: (startMinutes - dayStartMinutes) * pixelsPerMinute,
+    top: timelinePadY + (startMinutes - dayStartMinutes) * pixelsPerMinute,
     height: Math.max(duration * pixelsPerMinute, MIN_EVENT_HEIGHT),
     durationMinutes: duration,
   };

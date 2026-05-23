@@ -90,6 +90,7 @@ export interface Service {
   duration_minutes: number;
   price: number;
   category: string | null;
+  execution_mode?: "sequential" | "parallel";
   created_at: string;
   updated_at: string;
 }

@@ -22,6 +22,7 @@ import {
 } from "@/components/booking";
 import { useToast } from "@/hooks/use-toast";
 import { maskPhone } from "@/lib/masks";
+import { calculateBookingDurationMinutes } from "@/lib/bookingDuration";
 
 const INITIAL_CLIENT_FORM: ClientFormData = {
   name: "",
@@ -100,9 +101,7 @@ const ClientBookingInner = () => {
       ? (professionalsData?.data ?? [])
       : (allProsData?.data ?? []);
 
-  const totalDuration = services
-    .filter((s) => selectedServices.includes(s.id))
-    .reduce((acc, s) => acc + s.duration_minutes, 0);
+  const totalDuration = calculateBookingDurationMinutes(services, selectedServices);
   const totalPrice = services
     .filter((s) => selectedServices.includes(s.id))
     .reduce((acc, s) => acc + Number(s.price), 0);
@@ -130,7 +129,8 @@ const ClientBookingInner = () => {
             selectedPro,
             selectedDateStr,
             selectedServices,
-            serviceDurations
+            serviceDurations,
+            totalDuration
           )
         : Promise.resolve({ data: [] }),
     enabled:
@@ -222,6 +222,7 @@ const ClientBookingInner = () => {
         return;
       }
       queryClient.invalidateQueries({ queryKey: ["appointments"] });
+      queryClient.invalidateQueries({ queryKey: ["appointments-client"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard-activity"] });
       queryClient.invalidateQueries({ queryKey: ["clients", companyId] });

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import PageContainer from "@/components/shared/PageContainer";
 import { Button } from "@/components/ui/button";
@@ -6,6 +6,8 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useTenant } from "@/contexts/TenantContext";
 import { useAuth } from "@/hooks/useAuth";
 import { bookingService } from "@/services/booking.service";
+import { financialService } from "@/services/financial.service";
+import { isAppointmentEligibleForFinancial } from "@/lib/appointmentFinancial";
 import { clientService } from "@/services/client.service";
 import { professionalService } from "@/services/professional.service";
 import { serviceService } from "@/services/service.service";
@@ -209,7 +211,10 @@ const AppAgenda = () => {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => bookingService.delete(id),
+    mutationFn: async (id: string) => {
+      const { error } = await bookingService.delete(id);
+      if (error) throw error;
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["appointments"] });
       queryClient.invalidateQueries({ queryKey: ["financial"] });
@@ -222,8 +227,17 @@ const AppAgenda = () => {
   });
 
   const completeMutation = useMutation({
-    mutationFn: (id: string) =>
-      bookingService.update(id, { status: "completed", updated_by: user?.id }),
+    mutationFn: async (id: string) => {
+      const result = await bookingService.update(id, {
+        status: "completed",
+        updated_by: user?.id,
+      });
+      if (result.error) throw result.error;
+      if (companyId) {
+        await financialService.syncAppointmentRevenue(companyId, user?.id);
+      }
+      return result;
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["appointments"] });
       queryClient.invalidateQueries({ queryKey: ["financial"] });
@@ -234,7 +248,9 @@ const AppAgenda = () => {
       queryClient.invalidateQueries({ queryKey: ["dashboard-services"] });
       setEditingId(null);
       setCompleteConfirmId(null);
-      toast.success("Atendimento concluído! Registro financeiro atualizado.");
+      toast.success(
+        "Atendimento concluído! A receita entra no financeiro após o horário do atendimento."
+      );
     },
     onError: (e: Error) => {
       toast.error(e.message || "Erro ao concluir atendimento.");
@@ -242,7 +258,16 @@ const AppAgenda = () => {
   });
 
   const WEEK_DAYS = 7;
-  const dayLabels = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
+  const dayLabelsShort = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
+  const dayLabelsFull = [
+    "Segunda",
+    "Terça",
+    "Quarta",
+    "Quinta",
+    "Sexta",
+    "Sábado",
+    "Domingo",
+  ];
   const weekDays = Array.from({ length: WEEK_DAYS }, (_, i) => {
     const d = new Date(weekStart);
     d.setDate(d.getDate() + i);
@@ -250,13 +275,31 @@ const AppAgenda = () => {
       offset: i,
       dateObj: d,
       dateStr: format(d, "yyyy-MM-dd"),
-      label: dayLabels[i],
+      labelShort: dayLabelsShort[i],
+      labelFull: dayLabelsFull[i],
     };
   });
-  const mobileDay = weekDays[Math.min(Math.max(selectedDayOffset, 0), WEEK_DAYS - 1)];
-  const selectedDate = mobileDay.dateObj;
+  const selectedDay = weekDays[Math.min(Math.max(selectedDayOffset, 0), WEEK_DAYS - 1)];
+  const selectedDate = selectedDay.dateObj;
 
   const todayStr = format(new Date(), "yyyy-MM-dd");
+
+  useEffect(() => {
+    const todayIndex = weekDays.findIndex((d) => d.dateStr === todayStr);
+    setSelectedDayOffset(todayIndex >= 0 ? todayIndex : 0);
+  }, [weekStart, todayStr]);
+
+  const activeStatuses = new Set(["pending", "confirmed", "blocked", "completed"]);
+  const appointmentCountByDay = useMemo(() => {
+    const counts: Record<string, number> = Object.fromEntries(
+      weekDays.map((d) => [d.dateStr, 0])
+    );
+    for (const apt of appointments) {
+      if (!apt.date || !activeStatuses.has(apt.status ?? "")) continue;
+      if (counts[apt.date] !== undefined) counts[apt.date]++;
+    }
+    return counts;
+  }, [appointments, weekDays]);
 
   const handleEmptySlotClick = (payload: {
     professionalId: string;
@@ -320,34 +363,82 @@ const AppAgenda = () => {
         </div>
       </div>
 
-      {/* Dias em quadrados (mobile/tablet) */}
-      <div className="md:hidden mb-4">
-        <div className="grid grid-cols-4 sm:grid-cols-7 gap-2">
+      {/* Seletor estratégico da semana — visível em todas as telas */}
+      <section
+        className="mb-4 rounded-xl border border-border bg-card p-3 shadow-sm md:p-4"
+        aria-label="Selecionar dia da semana"
+      >
+        <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-sm font-semibold text-foreground">Dias da semana</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Agenda de{" "}
+              <span className="font-medium text-foreground">
+                {selectedDay.labelFull}, {format(selectedDate, "dd/MM/yyyy", { locale: ptBR })}
+              </span>
+              {selectedDay.dateStr === todayStr ? " · Hoje" : ""}
+            </p>
+          </div>
+          <p className="text-xs text-muted-foreground tabular-nums">
+            {appointmentCountByDay[selectedDay.dateStr] ?? 0} agendamento
+            {(appointmentCountByDay[selectedDay.dateStr] ?? 0) === 1 ? "" : "s"} neste dia
+          </p>
+        </div>
+
+        <div className="grid grid-cols-7 gap-1 sm:gap-2">
           {weekDays.map((d) => {
             const isSelected = d.offset === selectedDayOffset;
             const isToday = d.dateStr === todayStr;
+            const count = appointmentCountByDay[d.dateStr] ?? 0;
             return (
               <Button
                 key={d.dateStr}
                 type="button"
                 variant={isSelected ? "default" : "outline"}
                 size="sm"
-                className="aspect-square flex flex-col gap-0.5 p-1 h-auto"
+                className={`
+                  flex h-auto min-h-[4.5rem] flex-col items-center justify-center gap-0.5 rounded-lg px-1 py-2 sm:min-h-[5.25rem] sm:px-2
+                  ${isToday && !isSelected ? "ring-2 ring-primary/40 ring-offset-2 ring-offset-background" : ""}
+                `}
                 onClick={() => setSelectedDayOffset(d.offset)}
               >
-                <span className="text-[10px] font-normal opacity-90">{d.label}</span>
-                <span className="text-base font-semibold">{format(d.dateObj, "d")}</span>
-                {isToday && <span className="text-[10px]">Hoje</span>}
+                <span className="text-[10px] font-medium uppercase tracking-wide opacity-90 sm:hidden">
+                  {d.labelShort}
+                </span>
+                <span className="hidden text-[11px] font-semibold leading-tight sm:block md:text-xs">
+                  {d.labelFull}
+                </span>
+                <span className="text-lg font-bold tabular-nums leading-none sm:text-xl">
+                  {format(d.dateObj, "d")}
+                </span>
+                <span className="hidden text-[10px] text-muted-foreground md:block">
+                  {format(d.dateObj, "MMM", { locale: ptBR })}
+                </span>
+                {isToday && (
+                  <span
+                    className={`text-[9px] font-semibold uppercase sm:text-[10px] ${
+                      isSelected ? "text-primary-foreground/90" : "text-primary"
+                    }`}
+                  >
+                    Hoje
+                  </span>
+                )}
+                <span
+                  className={`mt-0.5 rounded-full px-1.5 py-0.5 text-[9px] font-medium tabular-nums sm:text-[10px] ${
+                    isSelected
+                      ? "bg-primary-foreground/20 text-primary-foreground"
+                      : count > 0
+                        ? "bg-primary/10 text-primary"
+                        : "bg-muted text-muted-foreground"
+                  }`}
+                >
+                  {count === 0 ? "—" : count}
+                </span>
               </Button>
             );
           })}
         </div>
-      </div>
-
-      <div className="mb-3 text-sm text-muted-foreground">
-        Visualizando agenda de <span className="font-medium">{mobileDay.label}</span>,{" "}
-        {format(selectedDate, "dd/MM/yyyy")} {mobileDay.dateStr === todayStr ? "(hoje)" : ""}
-      </div>
+      </section>
 
       <CalendarView
         date={selectedDate}
@@ -434,6 +525,11 @@ const AppAgenda = () => {
                 </ul>
                 <p className="text-sm font-medium pt-2 border-t">
                   Valor total: R$ {totalValue.toFixed(2).replace(".", ",")}
+                </p>
+                <p className="text-xs text-muted-foreground pt-2">
+                  {isAppointmentEligibleForFinancial(apt)
+                    ? "Este valor será lançado no financeiro (horário do atendimento já passou)."
+                    : "O lançamento no financeiro aparece quando o horário agendado terminar."}
                 </p>
               </>
             );

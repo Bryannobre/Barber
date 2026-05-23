@@ -22,6 +22,76 @@ const CREDENTIALS = {
   empresa: { email: "empresa@beautyhub.com", password: "Empresa123!", fullName: "Gestor Empresa", role: "company_admin" },
 };
 
+const DEFAULT_WORKING_DAYS = [0, 1, 2, 3, 4, 5, 6];
+
+async function seedBookingDemoData(companyId) {
+  if (!companyId) return;
+
+  const { count: svcCount } = await supabase
+    .from("services")
+    .select("id", { count: "exact", head: true })
+    .eq("company_id", companyId);
+  if ((svcCount ?? 0) > 0) {
+    console.log("Serviços da demo já existem — pulando seed de agenda.\n");
+    return;
+  }
+
+  const services = [
+    { name: "Corte", duration_minutes: 30, price: 45, category: "corte", execution_mode: "sequential" },
+    { name: "Barba", duration_minutes: 20, price: 25, category: "barba", execution_mode: "sequential" },
+    { name: "Corte + Barba", duration_minutes: 45, price: 65, category: "combo", execution_mode: "sequential" },
+  ];
+
+  const { data: insertedServices, error: svcErr } = await supabase
+    .from("services")
+    .insert(services.map((s) => ({ ...s, company_id: companyId })))
+    .select("id, name");
+
+  if (svcErr) {
+    console.warn("Aviso: não foi possível criar serviços demo:", svcErr.message);
+    return;
+  }
+
+  const pros = [
+    { name: "João Silva", specialty: "Barbeiro", is_active: true },
+    { name: "Maria Santos", specialty: "Cabeleireira", is_active: true },
+  ];
+
+  const { data: insertedPros, error: proErr } = await supabase
+    .from("professionals")
+    .insert(pros.map((p) => ({ ...p, company_id: companyId })))
+    .select("id, name");
+
+  if (proErr || !insertedPros?.length) {
+    console.warn("Aviso: não foi possível criar profissionais demo:", proErr?.message);
+    return;
+  }
+
+  const serviceIds = (insertedServices ?? []).map((s) => s.id);
+  const whRows = [];
+  for (const pro of insertedPros) {
+    for (const day of DEFAULT_WORKING_DAYS) {
+      whRows.push({
+        professional_id: pro.id,
+        day_of_week: day,
+        start_time: "09:00",
+        end_time: "19:00",
+      });
+    }
+    for (const sid of serviceIds) {
+      await supabase.from("professional_services").upsert(
+        { professional_id: pro.id, service_id: sid },
+        { onConflict: "professional_id,service_id" }
+      );
+    }
+  }
+
+  await supabase.from("working_hours").insert(whRows);
+  console.log(
+    `Demo agenda: ${insertedServices?.length ?? 0} serviços, ${insertedPros.length} profissionais (horários 09–19, intervalo 15 min no app).\n`
+  );
+}
+
 async function main() {
   console.log("Criando contas de teste...\n");
 
@@ -52,6 +122,8 @@ async function main() {
     }
   }
   console.log("Empresa OK (slug: barbearia-premium)\n");
+
+  await seedBookingDemoData(companyId);
 
   // 2. Criar admin (owner)
   const { data: adminUser, error: adminError } = await supabase.auth.admin.createUser({

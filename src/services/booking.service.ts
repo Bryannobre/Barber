@@ -3,6 +3,7 @@ import { requireCompanyId, requireUuid } from "@/lib/companyScope";
 import { addMinutes, parse, format, setHours, setMinutes } from "date-fns";
 import type { Appointment, Service } from "@/types/database.types";
 import { financialService } from "@/services/financial.service";
+import { BOOKING_SLOT_INTERVAL_MINUTES } from "@/lib/bookingDuration";
 
 export interface CreateAppointmentParams {
   company_id: string;
@@ -73,9 +74,20 @@ export interface AvailableSlot {
   unavailableReason?: "past" | "occupied";
 }
 
-const SLOT_INTERVAL_MINUTES = 30;
 const DEFAULT_OPENING_TIME = "09:00";
 const DEFAULT_CLOSING_TIME = "19:00";
+
+/** Data yyyy-MM-dd no fuso local (evita getDay errado com new Date('yyyy-MM-dd') em UTC). */
+function parseLocalDate(date: string): Date {
+  return parse(date, "yyyy-MM-dd", new Date());
+}
+
+function isExclusionViolation(error: { code?: string; message?: string } | null): boolean {
+  return (
+    error?.code === "23P01" ||
+    (error?.message?.includes("no_overlap_per_professional") ?? false)
+  );
+}
 
 function normalizeTime(value: string | null | undefined, fallback = "00:00") {
   return typeof value === "string" ? value.slice(0, 5) : fallback;
@@ -182,11 +194,15 @@ export const bookingService = {
     professionalId: string,
     date: string,
     serviceIds: string[],
-    serviceDurations: Record<string, number>
+    serviceDurations: Record<string, number>,
+    /** Quando informado, usa duração já calculada (execution_mode sequential/parallel). */
+    totalDurationMinutes?: number
   ): Promise<{ data: AvailableSlot[]; error: unknown }> {
     requireCompanyId(companyId);
     requireUuid(professionalId);
-    const totalDuration = serviceIds.reduce((acc, sid) => acc + (serviceDurations[sid] ?? 0), 0);
+    const totalDuration =
+      totalDurationMinutes ??
+      serviceIds.reduce((acc, sid) => acc + (serviceDurations[sid] ?? 0), 0);
     if (totalDuration <= 0) return { data: [], error: null };
 
     const { data: companyData, error: companyError } = await supabase
@@ -206,11 +222,12 @@ export const bookingService = {
 
     if (companyClose <= companyOpen) return { data: [], error: null };
 
+    const dayOfWeek = parseLocalDate(date).getDay();
     const { data: wh, error: whError } = await supabase
       .from("working_hours")
       .select("*")
       .eq("professional_id", professionalId)
-      .eq("day_of_week", new Date(date).getDay());
+      .eq("day_of_week", dayOfWeek);
 
     if (whError) return { data: [], error: whError };
     if (!wh?.length) return { data: [], error: null };
@@ -229,7 +246,8 @@ export const bookingService = {
     const nowMinutes = now.getHours() * 60 + now.getMinutes();
 
     const slots: AvailableSlot[] = [];
-    const dateStr = date;
+    const dayBase = parseLocalDate(date);
+    const slotStep = BOOKING_SLOT_INTERVAL_MINUTES;
 
     for (const w of wh) {
       const profStart = timeToMinutes(normalizeTime(w.start_time, DEFAULT_OPENING_TIME));
@@ -237,18 +255,18 @@ export const bookingService = {
 
       const effectiveStart = ceilToSlotBoundary(
         Math.max(profStart, companyOpen),
-        SLOT_INTERVAL_MINUTES
+        slotStep
       );
       const effectiveEnd = Math.min(profEnd, companyClose);
 
       if (effectiveEnd <= effectiveStart) continue;
 
       let current = setMinutes(
-        setHours(new Date(dateStr), Math.floor(effectiveStart / 60)),
+        setHours(dayBase, Math.floor(effectiveStart / 60)),
         effectiveStart % 60
       );
       const end = setMinutes(
-        setHours(new Date(dateStr), Math.floor(effectiveEnd / 60)),
+        setHours(dayBase, Math.floor(effectiveEnd / 60)),
         effectiveEnd % 60
       );
 
@@ -279,7 +297,7 @@ export const bookingService = {
             : undefined,
         });
 
-        current = addMinutes(current, SLOT_INTERVAL_MINUTES);
+        current = addMinutes(current, slotStep);
       }
     }
 
@@ -409,7 +427,7 @@ export const bookingService = {
       .single();
 
     if (aptError) {
-      if (aptError.code === "23505") {
+      if (aptError.code === "23505" || isExclusionViolation(aptError)) {
         return {
           data: null,
           error: new Error("Horário indisponível. Outro cliente acabou de agendar."),
@@ -419,12 +437,22 @@ export const bookingService = {
     }
 
     if (params.service_ids.length > 0) {
-      await supabase.from("appointment_services").insert(
+      const { error: svcError } = await supabase.from("appointment_services").insert(
         params.service_ids.map((sid) => ({
           appointment_id: (apt as Appointment).id,
           service_id: sid,
         }))
       );
+      if (svcError) {
+        await supabase.from("appointments").delete().eq("id", (apt as Appointment).id);
+        if (isExclusionViolation(svcError)) {
+          return {
+            data: null,
+            error: new Error("Horário indisponível. Outro cliente acabou de agendar."),
+          };
+        }
+        return { data: null, error: svcError };
+      }
     }
 
     return { data: apt as Appointment, error: null };
@@ -658,7 +686,7 @@ export const bookingService = {
       .single();
 
     if (aptError) {
-      if (aptError.code === "23505") {
+      if (aptError.code === "23505" || isExclusionViolation(aptError)) {
         return {
           data: null,
           error: new Error("Horário indisponível. Outro cliente acabou de agendar."),
@@ -680,36 +708,10 @@ export const bookingService = {
 
     if (params.status !== undefined && oldStatus !== newStatus) {
       if (newStatus === "completed") {
-        const hasValid = await financialService.hasValidRecordForAppointment(id);
-        if (!hasValid) {
-          const fullApt = await this.getById(id);
-          if (fullApt.data) {
-            const aptData = fullApt.data as Appointment & { service_ids?: string[] };
-            const serviceIds = aptData.service_ids ?? [];
-            const { data: servicesData } = serviceIds.length
-              ? await supabase.from("services").select("id, name, price").in("id", serviceIds)
-              : { data: [] as { id: string; name: string; price: number }[] };
-            const services = (servicesData ?? []) as (Service & { price?: number })[];
-            const { data: profData } = await supabase
-              .from("professionals")
-              .select("name")
-              .eq("id", aptData.professional_id)
-              .single();
-            const professionalName = (profData as { name?: string } | null)?.name ?? "—";
-            const clientName = aptData.client_name ?? "Cliente";
-            const serviceNames = services.map((s) => s.name).filter(Boolean).join(" + ") || "Atendimento";
-            const amount = services.reduce((sum, s) => sum + (Number(s.price) ?? 0), 0);
-            await financialService.createFromAppointment({
-              company_id: aptData.company_id,
-              appointment_id: id,
-              service_name_snapshot: serviceNames,
-              professional_name_snapshot: professionalName,
-              client_name_snapshot: clientName,
-              amount,
-              created_by: params.updated_by ?? aptData.created_by ?? "",
-            });
-          }
-        }
+        await financialService.tryCreateFinancialFromAppointment(
+          id,
+          params.updated_by
+        );
       } else if (oldStatus === "completed") {
         await financialService.invalidateByAppointmentId(id);
       }
@@ -721,8 +723,11 @@ export const bookingService = {
   async delete(id: string) {
     requireUuid(id);
     await financialService.invalidateByAppointmentId(id);
-    await supabase.from("appointment_services").delete().eq("appointment_id", id);
+    // appointment_services: ON DELETE CASCADE (não deletar manualmente — trigger de duração gerava 400)
     const { error } = await supabase.from("appointments").delete().eq("id", id);
+    if (error && import.meta.env.DEV) {
+      console.error("[booking.service] delete appointment:", error);
+    }
     return { error };
   },
 

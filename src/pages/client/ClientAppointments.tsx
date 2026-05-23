@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import type { Appointment } from "@/types/database.types";
+import { calculateBookingDurationMinutes } from "@/lib/bookingDuration";
 import { Calendar, Clock, XCircle, CalendarClock } from "lucide-react";
 
 const STATUS_LABELS: Record<string, string> = {
@@ -303,7 +304,6 @@ function RescheduleModal({
 
   const serviceIds =
     (aptDetails?.data as { service_ids?: string[] } | null)?.service_ids ?? [];
-  const duration = appointment.duration_minutes ?? 30;
   const dateStr = selectedDate ? format(selectedDate, "yyyy-MM-dd") : "";
 
   const { data: slotsData } = useQuery({
@@ -313,26 +313,31 @@ function RescheduleModal({
       appointment.professional_id,
       dateStr,
       serviceIds,
-      duration,
     ],
     queryFn: async () => {
       const { data: services } = await serviceService.listByCompany(companyId);
-      const durations = (services ?? []).reduce(
+      const list = services ?? [];
+      const durations = list.reduce(
         (acc, s) => ({ ...acc, [s.id]: s.duration_minutes }),
         {} as Record<string, number>
       );
       const ids = serviceIds.length > 0 ? serviceIds : [];
+      const totalDuration =
+        ids.length > 0
+          ? calculateBookingDurationMinutes(list, ids)
+          : (appointment.duration_minutes ?? 30);
+      const idsToUse = ids.length > 0 ? ids : ["__fallback__"];
       const durMap =
         ids.length > 0
           ? durations
-          : { __fallback__: duration } as Record<string, number>;
-      const idsToUse = ids.length > 0 ? ids : ["__fallback__"];
+          : ({ __fallback__: totalDuration } as Record<string, number>);
       return bookingService.getAvailableSlots(
         companyId,
         appointment.professional_id,
         dateStr,
         idsToUse,
-        durMap
+        durMap,
+        totalDuration
       );
     },
     enabled: !!companyId && !!dateStr,
