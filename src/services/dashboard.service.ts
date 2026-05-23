@@ -1,5 +1,6 @@
 import { supabase } from "@/lib/supabase";
 import { requireCompanyId } from "@/lib/companyScope";
+import { getPaymentChartLabel } from "@/lib/paymentMethods";
 import { addDays, differenceInCalendarDays, format, startOfMonth, startOfWeek, subDays } from "date-fns";
 
 export type DashboardRangeKey = "today" | "7d" | "30d" | "month";
@@ -28,7 +29,7 @@ export interface DashboardServicePoint {
 }
 
 export interface DashboardPaymentPoint {
-  method: "Pix" | "Dinheiro" | "Cartao" | "Outros";
+  method: string;
   value: number;
 }
 
@@ -237,7 +238,7 @@ export const dashboardService = {
     requireCompanyId(companyId);
     const { data, error } = await supabase
       .from("financial_records")
-      .select("source, amount")
+      .select("payment_method, amount")
       .eq("company_id", companyId)
       .eq("type", "income")
       .eq("is_valid", true)
@@ -246,29 +247,26 @@ export const dashboardService = {
 
     if (error) return { data: [] as DashboardPaymentPoint[], error };
 
-    const totals: Record<DashboardPaymentPoint["method"], number> = {
-      Pix: 0,
-      Dinheiro: 0,
-      Cartao: 0,
-      Outros: 0,
-    };
+    const totals = new Map<string, number>();
 
-    // Como ainda não há payment_method persistido, usamos source como proxy temporário.
     (data ?? []).forEach((row) => {
-      const source = String(row.source ?? "");
-      const amount = Number(row.amount ?? 0);
-      if (source === "product" || source === "product_sale") totals.Pix += amount;
-      else if (source === "manual") totals.Dinheiro += amount;
-      else if (source === "appointment") totals.Cartao += amount;
-      else totals.Outros += amount;
+      const label = getPaymentChartLabel(
+        (row as { payment_method?: string | null }).payment_method
+      );
+      const amount = Math.abs(Number(row.amount ?? 0));
+      totals.set(label, (totals.get(label) ?? 0) + amount);
     });
 
-    const result: DashboardPaymentPoint[] = [
-      { method: "Pix", value: totals.Pix },
-      { method: "Dinheiro", value: totals.Dinheiro },
-      { method: "Cartao", value: totals.Cartao },
-      { method: "Outros", value: totals.Outros },
-    ];
+    const order = ["PIX", "Dinheiro", "Cartão", "Transferência", "Outros"];
+    const result: DashboardPaymentPoint[] = order
+      .filter((method) => (totals.get(method) ?? 0) > 0)
+      .map((method) => ({ method, value: totals.get(method) ?? 0 }));
+
+    for (const [method, value] of totals) {
+      if (!order.includes(method)) {
+        result.push({ method, value });
+      }
+    }
 
     return { data: result, error: null };
   },

@@ -9,7 +9,7 @@ import {
 } from "@/services/booking.service";
 import { serviceService } from "@/services/service.service";
 import { professionalService } from "@/services/professional.service";
-import { format, parse, parseISO } from "date-fns";
+import { format, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,6 +27,9 @@ import { useToast } from "@/hooks/use-toast";
 import type { Appointment } from "@/types/database.types";
 import { calculateBookingDurationMinutes } from "@/lib/bookingDuration";
 import { Calendar, Clock, XCircle, CalendarClock } from "lucide-react";
+import { BookingCalendar } from "@/components/booking/BookingCalendar";
+import { BookingTimeSlots } from "@/components/booking/BookingTimeSlots";
+import { resolveBookingSlotIntervalMinutes } from "@/lib/bookingDuration";
 
 const STATUS_LABELS: Record<string, string> = {
   pending: "Pendente",
@@ -115,6 +118,9 @@ function AppointmentCard({
 const ClientAppointments = () => {
   const { user } = useAuth();
   const { currentCompany } = useTenant();
+  const slotIntervalMinutes = resolveBookingSlotIntervalMinutes(
+    currentCompany?.booking_slot_interval_minutes
+  );
   const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -265,6 +271,7 @@ const ClientAppointments = () => {
         <RescheduleModal
           appointment={rescheduleApt}
           companyId={currentCompany?.id ?? ""}
+          slotIntervalMinutes={slotIntervalMinutes}
           onClose={() => setRescheduleApt(null)}
           onConfirm={(date, startTime) => {
             rescheduleMutation.mutate({
@@ -283,17 +290,19 @@ const ClientAppointments = () => {
 function RescheduleModal({
   appointment,
   companyId,
+  slotIntervalMinutes,
   onClose,
   onConfirm,
   isPending,
 }: {
   appointment: Appointment;
   companyId: string;
+  slotIntervalMinutes: number;
   onClose: () => void;
   onConfirm: (date: Date, startTime: string) => void;
   isPending: boolean;
 }) {
-  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const [selectedDate, setSelectedDate] = useState<Date | undefined>();
   const [selectedTime, setSelectedTime] = useState<string | null>(null);
 
   const { data: aptDetails } = useQuery({
@@ -313,6 +322,7 @@ function RescheduleModal({
       appointment.professional_id,
       dateStr,
       serviceIds,
+      slotIntervalMinutes,
     ],
     queryFn: async () => {
       const { data: services } = await serviceService.listByCompany(companyId);
@@ -337,7 +347,8 @@ function RescheduleModal({
         dateStr,
         idsToUse,
         durMap,
-        totalDuration
+        totalDuration,
+        slotIntervalMinutes
       );
     },
     enabled: !!companyId && !!dateStr,
@@ -356,38 +367,23 @@ function RescheduleModal({
         </p>
         <div className="space-y-4">
           <div>
-            <label className="text-sm font-medium">Nova data</label>
-            <input
-              type="date"
-              min={format(new Date(), "yyyy-MM-dd")}
-              value={selectedDate ? format(selectedDate, "yyyy-MM-dd") : ""}
-              onChange={(e) => {
-                const d = e.target.value ? parse(e.target.value, "yyyy-MM-dd", new Date()) : null;
+            <label className="text-sm font-medium block mb-2">Nova data</label>
+            <BookingCalendar
+              selected={selectedDate}
+              onSelect={(d) => {
                 setSelectedDate(d);
                 setSelectedTime(null);
               }}
-              className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
             />
           </div>
           {dateStr && (
             <div>
-              <label className="text-sm font-medium">Novo horário</label>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {slots.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">Nenhum horário disponível neste dia</p>
-                ) : (
-                  slots.map((slot) => (
-                    <Button
-                      key={slot.startTime}
-                      variant={selectedTime === slot.startTime ? "default" : "outline"}
-                      size="sm"
-                      onClick={() => setSelectedTime(slot.startTime)}
-                    >
-                      {slot.startTime.slice(0, 5)}
-                    </Button>
-                  ))
-                )}
-              </div>
+              <label className="text-sm font-medium block mb-2">Novo horário</label>
+              <BookingTimeSlots
+                slots={slots}
+                selected={selectedTime}
+                onSelect={setSelectedTime}
+              />
             </div>
           )}
         </div>

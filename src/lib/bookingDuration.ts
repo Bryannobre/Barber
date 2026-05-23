@@ -1,5 +1,19 @@
-/** Intervalo entre horários oferecidos no agendamento (horários “quebrados”: 09:00, 09:15, 09:30…) */
-export const BOOKING_SLOT_INTERVAL_MINUTES = 15;
+/** Padrão quando a empresa não define intervalo */
+export const DEFAULT_BOOKING_SLOT_INTERVAL_MINUTES = 15;
+
+const ALLOWED_SLOT_INTERVALS = [5, 10, 15, 30] as const;
+
+export function resolveBookingSlotIntervalMinutes(
+  companyValue?: number | null
+): number {
+  if (
+    companyValue != null &&
+    ALLOWED_SLOT_INTERVALS.includes(companyValue as (typeof ALLOWED_SLOT_INTERVALS)[number])
+  ) {
+    return companyValue;
+  }
+  return DEFAULT_BOOKING_SLOT_INTERVAL_MINUTES;
+}
 
 export type ServiceDurationInput = {
   id: string;

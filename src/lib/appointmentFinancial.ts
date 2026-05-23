@@ -14,8 +14,23 @@ export function getAppointmentEndDate(apt: AppointmentTiming): Date {
   return addMinutes(base, apt.duration_minutes ?? 0);
 }
 
+function isAppointmentEndTimePassed(apt: AppointmentTiming, now = new Date()): boolean {
+  return getAppointmentEndDate(apt).getTime() <= now.getTime();
+}
+
+/** Pode marcar como concluído só após o horário agendado terminar. */
+export function canMarkAppointmentCompleted(
+  apt: AppointmentTiming,
+  now = new Date()
+): boolean {
+  if (["cancelled", "completed", "no_show", "blocked"].includes(apt.status ?? "")) {
+    return false;
+  }
+  return isAppointmentEndTimePassed(apt, now);
+}
+
 /** Receita de agendamento só entra no financeiro após conclusão e fim do horário. */
 export function isAppointmentEligibleForFinancial(apt: AppointmentTiming, now = new Date()): boolean {
   if (apt.status !== "completed") return false;
-  return getAppointmentEndDate(apt).getTime() <= now.getTime();
+  return isAppointmentEndTimePassed(apt, now);
 }

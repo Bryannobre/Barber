@@ -3,7 +3,7 @@ import { requireCompanyId, requireUuid } from "@/lib/companyScope";
 import { addMinutes, parse, format, setHours, setMinutes } from "date-fns";
 import type { Appointment, Service } from "@/types/database.types";
 import { financialService } from "@/services/financial.service";
-import { BOOKING_SLOT_INTERVAL_MINUTES } from "@/lib/bookingDuration";
+import { resolveBookingSlotIntervalMinutes } from "@/lib/bookingDuration";
 
 export interface CreateAppointmentParams {
   company_id: string;
@@ -61,6 +61,7 @@ export interface UpdateAppointmentParams {
   status?: Appointment["status"];
   notes?: string | null;
   service_ids?: string[];
+  payment_method?: string | null;
   /** Usuário que alterou (para auditoria financeira) */
   updated_by?: string;
 }
@@ -196,7 +197,10 @@ export const bookingService = {
     serviceIds: string[],
     serviceDurations: Record<string, number>,
     /** Quando informado, usa duração já calculada (execution_mode sequential/parallel). */
-    totalDurationMinutes?: number
+    totalDurationMinutes?: number,
+    slotIntervalMinutes?: number,
+    /** Em edição: não bloquear o próprio horário do agendamento */
+    excludeAppointmentId?: string
   ): Promise<{ data: AvailableSlot[]; error: unknown }> {
     requireCompanyId(companyId);
     requireUuid(professionalId);
@@ -207,7 +211,7 @@ export const bookingService = {
 
     const { data: companyData, error: companyError } = await supabase
       .from("companies")
-      .select("opening_time, closing_time")
+      .select("opening_time, closing_time, booking_slot_interval_minutes")
       .eq("id", companyId)
       .single();
 
@@ -236,10 +240,37 @@ export const bookingService = {
       p_professional_id: professionalId,
       p_date: date,
     });
-    const busyPeriods = (Array.isArray(busyData) ? busyData : []) as {
+    let busyPeriods = (Array.isArray(busyData) ? busyData : []) as {
       start_time?: string;
       duration_minutes?: number;
     }[];
+
+    if (excludeAppointmentId) {
+      const { data: excluded } = await supabase
+        .from("appointments")
+        .select("start_time, duration_minutes, status")
+        .eq("id", excludeAppointmentId)
+        .single();
+      if (
+        excluded &&
+        ["pending", "confirmed", "blocked"].includes(
+          (excluded as { status?: string }).status ?? ""
+        )
+      ) {
+        const exStart = normalizeTime(
+          (excluded as { start_time?: string }).start_time,
+          DEFAULT_OPENING_TIME
+        );
+        const exDur = (excluded as { duration_minutes?: number }).duration_minutes ?? 0;
+        busyPeriods = busyPeriods.filter(
+          (b) =>
+            !(
+              normalizeTime(b.start_time, DEFAULT_OPENING_TIME) === exStart &&
+              (b.duration_minutes ?? 0) === exDur
+            )
+        );
+      }
+    }
 
     const now = new Date();
     const today = format(now, "yyyy-MM-dd");
@@ -247,7 +278,11 @@ export const bookingService = {
 
     const slots: AvailableSlot[] = [];
     const dayBase = parseLocalDate(date);
-    const slotStep = BOOKING_SLOT_INTERVAL_MINUTES;
+    // Prioridade: valor salvo no banco (evita tenant/cache desatualizado no cliente)
+    const slotStep = resolveBookingSlotIntervalMinutes(
+      (companyData as { booking_slot_interval_minutes?: number } | null)
+        ?.booking_slot_interval_minutes ?? slotIntervalMinutes
+    );
 
     for (const w of wh) {
       const profStart = timeToMinutes(normalizeTime(w.start_time, DEFAULT_OPENING_TIME));
@@ -592,29 +627,10 @@ export const bookingService = {
     }
 
     if (params.status === "completed") {
-      const serviceIds = params.service_ids ?? [];
-      const { data: servicesData } = serviceIds.length
-        ? await supabase.from("services").select("id, name, price").in("id", serviceIds)
-        : { data: [] as { id: string; name: string; price: number }[] };
-      const services = (servicesData ?? []) as (Service & { price?: number })[];
-      const { data: profData } = await supabase
-        .from("professionals")
-        .select("name")
-        .eq("id", params.professional_id)
-        .single();
-      const professionalName = (profData as { name?: string } | null)?.name ?? "—";
-      const clientName = params.client_name ?? "Cliente";
-      const serviceNames = services.map((s) => s.name).filter(Boolean).join(" + ") || "Atendimento";
-      const amount = services.reduce((sum, s) => sum + (Number(s.price) ?? 0), 0);
-      await financialService.createFromAppointment({
-        company_id: params.company_id,
-        appointment_id: (apt as Appointment).id,
-        service_name_snapshot: serviceNames,
-        professional_name_snapshot: professionalName,
-        client_name_snapshot: clientName,
-        amount,
-        created_by: params.created_by ?? "",
-      });
+      await financialService.reconcileAppointmentFinancial(
+        (apt as Appointment).id,
+        params.created_by
+      );
     }
 
     return { data: apt as Appointment, error: null };
@@ -676,6 +692,9 @@ export const bookingService = {
       ...(params.duration_minutes !== undefined && { duration_minutes: params.duration_minutes }),
       ...(params.status !== undefined && { status: params.status }),
       ...(params.notes !== undefined && { notes: params.notes }),
+      ...(params.payment_method !== undefined && {
+        payment_method: params.payment_method,
+      }),
     };
 
     const { data: apt, error: aptError } = await supabase
@@ -707,14 +726,12 @@ export const bookingService = {
     const newStatus = (apt as Appointment).status;
 
     if (params.status !== undefined && oldStatus !== newStatus) {
-      if (newStatus === "completed") {
-        await financialService.tryCreateFinancialFromAppointment(
-          id,
-          params.updated_by
-        );
-      } else if (oldStatus === "completed") {
-        await financialService.invalidateByAppointmentId(id);
-      }
+      await financialService.reconcileAppointmentFinancial(id, params.updated_by);
+    } else if (
+      params.service_ids !== undefined &&
+      (apt as Appointment).status === "completed"
+    ) {
+      await financialService.reconcileAppointmentFinancial(id, params.updated_by);
     }
 
     return { data: apt as Appointment, error: null };

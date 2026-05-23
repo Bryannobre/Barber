@@ -9,6 +9,7 @@ import {
   getAppointmentEndDate,
   isAppointmentEligibleForFinancial,
 } from "@/lib/appointmentFinancial";
+import { DEFAULT_PAYMENT_METHOD, type PaymentMethod } from "@/lib/paymentMethods";
 import type { Appointment, FinancialRecord, Service } from "@/types/database.types";
 
 export interface CreateFromAppointmentParams {
@@ -21,6 +22,7 @@ export interface CreateFromAppointmentParams {
   created_by: string;
   /** Data/hora do atendimento (fim do serviço) — usada como data do lançamento */
   occurred_at?: string;
+  payment_method?: PaymentMethod | string | null;
 }
 
 export interface FinancialStats {
@@ -76,6 +78,7 @@ export const financialService = {
         professional_name_snapshot: params.professional_name_snapshot,
         created_by: params.created_by,
         created_at: params.occurred_at ?? new Date().toISOString(),
+        payment_method: params.payment_method ?? DEFAULT_PAYMENT_METHOD,
         is_valid: true,
       })
       .select()
@@ -86,29 +89,113 @@ export const financialService = {
   /**
    * Cria receita de um agendamento se: concluído, horário já passou e ainda não existe lançamento válido.
    */
-  async tryCreateFinancialFromAppointment(
+  /**
+   * Mantém lançamento de agendamento alinhado ao status e aos serviços.
+   * - Concluído + horário passou → cria ou atualiza valor
+   * - Concluído + horário ainda não passou → invalida antecipado
+   * - Cancelado / não compareceu / outro status → invalida
+   */
+  async reconcileAppointmentFinancial(
     appointmentId: string,
     createdBy?: string | null
-  ): Promise<{ created: boolean; error: unknown }> {
+  ): Promise<{ action: "created" | "updated" | "invalidated" | "none"; error: unknown }> {
     requireUuid(appointmentId);
     const { data: apt, error: aptErr } = await supabase
       .from("appointments")
       .select(
-        "id, company_id, professional_id, client_name, date, start_time, duration_minutes, status, ends_at, starts_at, created_by"
+        "id, company_id, professional_id, client_name, date, start_time, duration_minutes, status, ends_at, starts_at, created_by, payment_method"
       )
       .eq("id", appointmentId)
       .single();
 
-    if (aptErr || !apt) return { created: false, error: aptErr };
+    if (aptErr || !apt) return { action: "none", error: aptErr };
 
     const appointment = apt as Appointment;
-    if (!isAppointmentEligibleForFinancial(appointment)) {
-      return { created: false, error: null };
+    const status = appointment.status ?? "";
+
+    if (["cancelled", "no_show", "blocked", "pending", "confirmed"].includes(status)) {
+      const had = await this.hasValidRecordForAppointment(appointmentId);
+      if (had) {
+        await this.invalidateByAppointmentId(appointmentId);
+        return { action: "invalidated", error: null };
+      }
+      return { action: "none", error: null };
     }
 
-    const hasValid = await this.hasValidRecordForAppointment(appointmentId);
-    if (hasValid) return { created: false, error: null };
+    if (status !== "completed") {
+      return { action: "none", error: null };
+    }
 
+    if (!isAppointmentEligibleForFinancial(appointment)) {
+      const had = await this.hasValidRecordForAppointment(appointmentId);
+      if (had) {
+        await this.invalidateByAppointmentId(appointmentId);
+        return { action: "invalidated", error: null };
+      }
+      return { action: "none", error: null };
+    }
+
+    const snapshot = await this.buildAppointmentFinancialSnapshot(appointmentId, appointment);
+    if (!snapshot) {
+      return { action: "none", error: new Error("Serviço sem valor cadastrado.") };
+    }
+
+    const paymentMethod =
+      appointment.payment_method ?? DEFAULT_PAYMENT_METHOD;
+
+    const { data: existing } = await supabase
+      .from("financial_records")
+      .select("id, amount, payment_method")
+      .eq("appointment_id", appointmentId)
+      .eq("is_valid", true)
+      .maybeSingle();
+
+    if (existing?.id) {
+      const currentAmount = Math.abs(Number(existing.amount));
+      const amountSame = Math.abs(currentAmount - snapshot.amount) < 0.01;
+      const paymentSame = (existing.payment_method ?? null) === paymentMethod;
+      if (amountSame && paymentSame) {
+        return { action: "none", error: null };
+      }
+      const { error } = await supabase
+        .from("financial_records")
+        .update({
+          amount: snapshot.amount,
+          description: `${snapshot.serviceNames} - ${snapshot.clientName}`,
+          service_name_snapshot: snapshot.serviceNames,
+          client_name_snapshot: snapshot.clientName,
+          professional_name_snapshot: snapshot.professionalName,
+          created_at: snapshot.occurredAt,
+          payment_method: paymentMethod,
+        })
+        .eq("id", existing.id);
+      return { action: "updated", error };
+    }
+
+    const { error } = await this.createFromAppointment({
+      company_id: appointment.company_id,
+      appointment_id: appointmentId,
+      service_name_snapshot: snapshot.serviceNames,
+      professional_name_snapshot: snapshot.professionalName,
+      client_name_snapshot: snapshot.clientName,
+      amount: snapshot.amount,
+      created_by: createdBy ?? appointment.created_by ?? "",
+      occurred_at: snapshot.occurredAt,
+      payment_method: paymentMethod,
+    });
+    return { action: "created", error };
+  },
+
+  async buildAppointmentFinancialSnapshot(
+    appointmentId: string,
+    appointment: Appointment
+  ): Promise<{
+    serviceNames: string;
+    professionalName: string;
+    clientName: string;
+    amount: number;
+    occurredAt: string;
+  } | null> {
     const { data: svcLinks } = await supabase
       .from("appointment_services")
       .select("service_id")
@@ -136,23 +223,38 @@ export const financialService = {
       services.map((s) => s.name).filter(Boolean).join(" + ") || "Atendimento";
     const amount = services.reduce((sum, s) => sum + (Number(s.price) ?? 0), 0);
 
-    if (amount <= 0) {
-      return { created: false, error: new Error("Serviço sem valor cadastrado.") };
-    }
+    if (amount <= 0) return null;
 
-    const occurredAt = getAppointmentEndDate(appointment).toISOString();
-    const { error } = await this.createFromAppointment({
-      company_id: appointment.company_id,
-      appointment_id: appointmentId,
-      service_name_snapshot: serviceNames,
-      professional_name_snapshot: professionalName,
-      client_name_snapshot: clientName,
+    return {
+      serviceNames,
+      professionalName,
+      clientName,
       amount,
-      created_by: createdBy ?? appointment.created_by ?? "",
-      occurred_at: occurredAt,
-    });
+      occurredAt: getAppointmentEndDate(appointment).toISOString(),
+    };
+  },
 
-    return { created: !error, error };
+  async tryCreateFinancialFromAppointment(
+    appointmentId: string,
+    createdBy?: string | null
+  ): Promise<{ created: boolean; error: unknown }> {
+    requireUuid(appointmentId);
+    const { data: apt, error: aptErr } = await supabase
+      .from("appointments")
+      .select(
+        "id, company_id, professional_id, client_name, date, start_time, duration_minutes, status, ends_at, starts_at, created_by, payment_method"
+      )
+      .eq("id", appointmentId)
+      .single();
+
+    if (aptErr || !apt) return { created: false, error: aptErr };
+
+    const appointment = apt as Appointment;
+    const result = await this.reconcileAppointmentFinancial(appointmentId, createdBy);
+    return {
+      created: result.action === "created",
+      error: result.error,
+    };
   },
 
   /**
@@ -193,13 +295,12 @@ export const financialService = {
 
     let synced = 0;
     for (const row of completedRows ?? []) {
-      if (!isAppointmentEligibleForFinancial(row as Appointment)) continue;
-      const { created, error } = await this.tryCreateFinancialFromAppointment(
+      const { action, error } = await this.reconcileAppointmentFinancial(
         row.id,
         createdBy
       );
       if (error) return { synced, error };
-      if (created) synced += 1;
+      if (action === "created" || action === "updated") synced += 1;
     }
 
     return { synced, error: null };

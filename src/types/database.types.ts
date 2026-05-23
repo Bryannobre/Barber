@@ -52,6 +52,8 @@ export interface Company {
   phone: string | null;
   opening_time: string | null;
   closing_time: string | null;
+  /** Intervalo entre slots de agendamento (5, 10, 15 ou 30 minutos) */
+  booking_slot_interval_minutes?: number;
   customization_enabled: boolean;
   dashboard_theme: "dark" | "light" | null;
   dashboard_primary_color: string | null;
@@ -160,6 +162,8 @@ export interface Appointment {
   duration_minutes: number;
   status: AppointmentStatus;
   notes: string | null;
+  /** Informada ao concluir atendimento (pix, cash, credit_card, …) */
+  payment_method?: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -256,6 +260,7 @@ export interface FinancialRecord {
   created_by: string | null;
   created_at: string;
   is_valid: boolean;
+  payment_method?: string | null;
 }
 
 export interface ProfessionalPaymentSettings {
@@ -324,7 +329,13 @@ export interface RecadoMention {
   mentioned_user_id: string;
 }
 
-export type AppNotificationType = "mention" | "global";
+export type AppNotificationType =
+  | "mention"
+  | "global"
+  | "appointment_created"
+  | "appointment_cancelled"
+  | "appointment_updated"
+  | "appointment_completed";
 
 export interface AppNotification {
   id: string;
@@ -337,6 +348,7 @@ export interface AppNotification {
   created_at: string;
   recado_id: string | null;
   comment_id: string | null;
+  appointment_id: string | null;
 }
 
 export interface CreateNotificationInput {

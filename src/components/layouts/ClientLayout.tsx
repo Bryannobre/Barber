@@ -8,6 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import { companyLandingService } from "@/services/companyLanding.service";
 import { applyCompanyThemeForSite } from "@/lib/companyTheme";
 import { ClientAuthModal } from "@/components/client/ClientAuthModal";
+import { ClientAppointmentReminder } from "@/components/client/ClientAppointmentReminder";
 
 const navItems = (
   bookingPath: string
@@ -134,6 +135,7 @@ const ClientLayout = () => {
 
         <main className="flex-1 overflow-auto p-4 pb-24 md:p-6 md:pb-6 lg:p-8 lg:pb-8 scrollbar-theme">
           <div className="mx-auto w-full max-w-lg md:max-w-2xl lg:max-w-4xl xl:max-w-5xl">
+            {user && <ClientAppointmentReminder />}
             <Outlet />
           </div>
         </main>

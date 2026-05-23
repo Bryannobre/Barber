@@ -34,6 +34,7 @@ import {
   type PeriodKey,
 } from "@/lib/dateUtils";
 import type { FinancialRecord } from "@/types/database.types";
+import { getPaymentMethodLabel } from "@/lib/paymentMethods";
 
 const PERIOD_OPTIONS: { id: PeriodKey; label: string }[] = [
   { id: "today", label: "Hoje" },
@@ -206,7 +207,11 @@ const AppFinancial = () => {
 
   const syncAndLoad = async () => {
     if (companyId) {
-      await financialService.syncAppointmentRevenue(companyId, user?.id);
+      const { error } = await financialService.syncAppointmentRevenue(
+        companyId,
+        user?.id
+      );
+      if (error) throw error;
     }
     return financialService.listByCompany(companyId, {
       startDate,
@@ -415,13 +420,14 @@ const AppFinancial = () => {
               <TableHead>Profissional</TableHead>
               <TableHead>Data</TableHead>
               <TableHead className="hidden sm:table-cell">Origem</TableHead>
+              <TableHead className="hidden md:table-cell">Pagamento</TableHead>
               <TableHead className="text-right">Valor</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {filteredRecords.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center text-muted-foreground py-12">
+                <TableCell colSpan={7} className="text-center text-muted-foreground py-12">
                   {records.length === 0
                     ? "Nenhuma movimentação no período. Receitas de cortes entram aqui quando o agendamento está \"Concluído\" e o horário do atendimento já passou. Use os botões acima para entradas ou saídas manuais."
                     : "Nenhum registro com essa origem no período."}
@@ -451,6 +457,11 @@ const AppFinancial = () => {
                   </TableCell>
                   <TableCell className="hidden sm:table-cell text-muted-foreground align-top text-xs">
                     {formatSource(r.source)}
+                  </TableCell>
+                  <TableCell className="hidden md:table-cell text-muted-foreground align-top text-xs">
+                    {r.type === "income"
+                      ? getPaymentMethodLabel(r.payment_method)
+                      : "—"}
                   </TableCell>
                   <TableCell
                     className={cn(

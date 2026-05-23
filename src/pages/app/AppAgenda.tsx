@@ -1,29 +1,37 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import PageContainer from "@/components/shared/PageContainer";
 import { Button } from "@/components/ui/button";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import { useTenant } from "@/contexts/TenantContext";
 import { useAuth } from "@/hooks/useAuth";
 import { bookingService } from "@/services/booking.service";
 import { financialService } from "@/services/financial.service";
-import { isAppointmentEligibleForFinancial } from "@/lib/appointmentFinancial";
+import { canMarkAppointmentCompleted } from "@/lib/appointmentFinancial";
+import { getAgendaSetupStatus } from "@/lib/agendaSetup";
+import { AgendaSetupBanner } from "@/components/app/agenda/AgendaSetupBanner";
+import { AgendaWeekOverview } from "@/components/app/agenda/AgendaWeekOverview";
 import { clientService } from "@/services/client.service";
 import { professionalService } from "@/services/professional.service";
 import { serviceService } from "@/services/service.service";
-import { format, addWeeks, subWeeks, startOfWeek, setHours, setMinutes } from "date-fns";
+import {
+  format,
+  addWeeks,
+  subWeeks,
+  startOfWeek,
+  setHours,
+  setMinutes,
+  parseISO,
+  differenceInCalendarDays,
+} from "date-fns";
+import { suggestQuickBookingSlot } from "@/lib/agendaQuickBooking";
 import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
-import type { Appointment, ProfessionalWithServices, Service } from "@/types/database.types";
+import type { Appointment, ProfessionalWithServices } from "@/types/database.types";
 import { AppointmentFormModal, type FormValues } from "@/components/app/AppointmentFormModal";
 import { CalendarView } from "@/components/app/calendar/CalendarView";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
+import { useCompanyBookingSlotInterval } from "@/hooks/useCompanyBookingSlotInterval";
 
 const DEFAULT_OPENING_TIME = "09:00";
 const DEFAULT_CLOSING_TIME = "19:00";
@@ -43,12 +51,26 @@ const STATUS_LEGEND = [
 ] as const;
 
 const AppAgenda = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const { currentCompany } = useTenant();
   const { user } = useAuth();
   const companyId = currentCompany?.id ?? "";
-  const openingTime = (currentCompany?.opening_time ?? DEFAULT_OPENING_TIME).slice(0, 5);
-  const closingTime = (currentCompany?.closing_time ?? DEFAULT_CLOSING_TIME).slice(0, 5);
+  const { slotIntervalMinutes, openingTime: dbOpening, closingTime: dbClosing } =
+    useCompanyBookingSlotInterval(
+      companyId,
+      currentCompany?.booking_slot_interval_minutes
+    );
+  const openingTime = (
+    dbOpening ?? currentCompany?.opening_time ?? DEFAULT_OPENING_TIME
+  )
+    .toString()
+    .slice(0, 5);
+  const closingTime = (
+    dbClosing ?? currentCompany?.closing_time ?? DEFAULT_CLOSING_TIME
+  )
+    .toString()
+    .slice(0, 5);
   const [weekStart, setWeekStart] = useState(() =>
     startOfWeek(new Date(), { weekStartsOn: 1 })
   );
@@ -58,9 +80,12 @@ const AppAgenda = () => {
     startTime: string;
     professionalId: string;
     professionalName: string;
+    serviceIds?: string[];
   } | null>(null);
+  const [quickCreateLoading, setQuickCreateLoading] = useState(false);
+  const quickNewFromUrlHandled = useRef(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [completeConfirmId, setCompleteConfirmId] = useState<string | null>(null);
+  const [agendaView, setAgendaView] = useState<"day" | "week">("day");
 
   const startDate = format(weekStart, "yyyy-MM-dd");
   const endDate = format(addWeeks(weekStart, 1), "yyyy-MM-dd");
@@ -93,13 +118,6 @@ const AppAgenda = () => {
     queryKey: ["appointment", editingId],
     queryFn: () => (editingId ? bookingService.getById(editingId) : Promise.resolve({ data: null })),
     enabled: !!editingId,
-  });
-
-  const { data: completeConfirmAppointmentData } = useQuery({
-    queryKey: ["appointment", completeConfirmId],
-    queryFn: () =>
-      completeConfirmId ? bookingService.getById(completeConfirmId) : Promise.resolve({ data: null }),
-    enabled: !!completeConfirmId,
   });
 
   const professionals: ProfessionalWithServices[] = professionalsData?.data ?? [];
@@ -227,18 +245,34 @@ const AppAgenda = () => {
   });
 
   const completeMutation = useMutation({
-    mutationFn: async (id: string) => {
+    mutationFn: async ({
+      id,
+      paymentMethod,
+    }: {
+      id: string;
+      paymentMethod: string;
+    }) => {
+      const apt = appointments.find((a) => a.id === id);
+      if (apt && !canMarkAppointmentCompleted(apt)) {
+        throw new Error(
+          "Só é possível concluir após o horário do atendimento terminar."
+        );
+      }
       const result = await bookingService.update(id, {
         status: "completed",
+        payment_method: paymentMethod,
         updated_by: user?.id,
       });
       if (result.error) throw result.error;
+      let finAction: "created" | "updated" | "invalidated" | "none" = "none";
       if (companyId) {
+        const fin = await financialService.reconcileAppointmentFinancial(id, user?.id);
+        finAction = fin.action;
         await financialService.syncAppointmentRevenue(companyId, user?.id);
       }
-      return result;
+      return { result, finAction };
     },
-    onSuccess: () => {
+    onSuccess: (payload) => {
       queryClient.invalidateQueries({ queryKey: ["appointments"] });
       queryClient.invalidateQueries({ queryKey: ["financial"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
@@ -246,11 +280,16 @@ const AppAgenda = () => {
       queryClient.invalidateQueries({ queryKey: ["dashboard-activity"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard-performance"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard-services"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard-payments"] });
       setEditingId(null);
-      setCompleteConfirmId(null);
-      toast.success(
-        "Atendimento concluído! A receita entra no financeiro após o horário do atendimento."
-      );
+      const finAction = payload?.finAction;
+      if (finAction === "created" || finAction === "updated") {
+        toast.success("Atendimento concluído e receita registrada no financeiro.");
+      } else {
+        toast.success(
+          "Atendimento concluído! A receita entra no financeiro quando o horário do atendimento terminar."
+        );
+      }
     },
     onError: (e: Error) => {
       toast.error(e.message || "Erro ao concluir atendimento.");
@@ -288,6 +327,99 @@ const AppAgenda = () => {
     const todayIndex = weekDays.findIndex((d) => d.dateStr === todayStr);
     setSelectedDayOffset(todayIndex >= 0 ? todayIndex : 0);
   }, [weekStart, todayStr]);
+
+  const editFromUrl = searchParams.get("edit");
+  useEffect(() => {
+    if (editFromUrl) {
+      setEditingId(editFromUrl);
+      setAgendaView("day");
+      setSearchParams({}, { replace: true });
+    }
+  }, [editFromUrl, setSearchParams]);
+
+  const setupStatus = useMemo(
+    () => getAgendaSetupStatus(services, professionals),
+    [services, professionals]
+  );
+
+  const openQuickNewAppointment = useCallback(async () => {
+    if (!companyId) return;
+    if (!setupStatus.ready) {
+      toast.error("Cadastre serviços, profissionais e horários de trabalho antes de agendar.");
+      return;
+    }
+    if (!professionals.length) {
+      toast.error("Nenhum profissional cadastrado.");
+      return;
+    }
+
+    const preferredDate =
+      selectedDay.dateStr >= todayStr ? selectedDay.dateStr : todayStr;
+
+    setQuickCreateLoading(true);
+    try {
+      const suggestion = await suggestQuickBookingSlot({
+        companyId,
+        professionals,
+        services,
+        preferredDate,
+      });
+
+      if (!suggestion) {
+        toast.error(
+          "Nenhum horário livre nos próximos dias. Verifique horários de trabalho e agendamentos existentes."
+        );
+        return;
+      }
+
+      const suggestionDate = parseISO(suggestion.date);
+      const week = startOfWeek(suggestionDate, { weekStartsOn: 1 });
+      setWeekStart(week);
+      setSelectedDayOffset(
+        Math.min(6, Math.max(0, differenceInCalendarDays(suggestionDate, week)))
+      );
+      setAgendaView("day");
+      setNewSlot({
+        date: suggestion.date,
+        startTime: suggestion.startTime,
+        professionalId: suggestion.professionalId,
+        professionalName: suggestion.professionalName,
+        serviceIds: suggestion.serviceIds,
+      });
+      toast.success(
+        `Horário sugerido: ${format(suggestionDate, "dd/MM", { locale: ptBR })} às ${suggestion.startTime}`
+      );
+    } finally {
+      setQuickCreateLoading(false);
+    }
+  }, [
+    companyId,
+    setupStatus.ready,
+    professionals,
+    services,
+    selectedDay.dateStr,
+    todayStr,
+  ]);
+
+  const newFromUrl = searchParams.get("new");
+  useEffect(() => {
+    if (newFromUrl !== "1") {
+      quickNewFromUrlHandled.current = false;
+      return;
+    }
+    if (quickNewFromUrlHandled.current) return;
+    if (!companyId || !professionalsData || !servicesData) return;
+    quickNewFromUrlHandled.current = true;
+    setSearchParams({}, { replace: true });
+    void openQuickNewAppointment();
+  }, [
+    newFromUrl,
+    companyId,
+    professionalsData,
+    servicesData,
+    openQuickNewAppointment,
+    setSearchParams,
+  ]);
 
   const activeStatuses = new Set(["pending", "confirmed", "blocked", "completed"]);
   const appointmentCountByDay = useMemo(() => {
@@ -340,7 +472,16 @@ const AppAgenda = () => {
               Cliente recorrente
             </span>
           </div>
-          <div className="flex items-center justify-center md:justify-end gap-2 shrink-0">
+          <div className="flex items-center justify-center md:justify-end gap-2 shrink-0 flex-wrap">
+            <Button
+              size="sm"
+              className="gap-1.5 shadow-sm"
+              onClick={() => void openQuickNewAppointment()}
+              disabled={quickCreateLoading || !setupStatus.ready}
+            >
+              <Plus size={16} />
+              {quickCreateLoading ? "Buscando horário…" : "Novo agendamento"}
+            </Button>
             <Button
               variant="outline"
               size="icon"
@@ -363,6 +504,38 @@ const AppAgenda = () => {
         </div>
       </div>
 
+      <AgendaSetupBanner ready={setupStatus.ready} issues={setupStatus.issues} />
+
+      <div className="mb-4 flex flex-wrap gap-2">
+        <Button
+          variant={agendaView === "day" ? "default" : "outline"}
+          size="sm"
+          onClick={() => setAgendaView("day")}
+        >
+          Visão do dia
+        </Button>
+        <Button
+          variant={agendaView === "week" ? "default" : "outline"}
+          size="sm"
+          onClick={() => setAgendaView("week")}
+        >
+          Resumo da semana
+        </Button>
+      </div>
+
+      {agendaView === "week" && (
+        <AgendaWeekOverview
+          weekDays={weekDays}
+          appointments={appointments}
+          selectedDayOffset={selectedDayOffset}
+          todayStr={todayStr}
+          onSelectDay={(offset) => {
+            setSelectedDayOffset(offset);
+            setAgendaView("day");
+          }}
+        />
+      )}
+
       {/* Seletor estratégico da semana — visível em todas as telas */}
       <section
         className="mb-4 rounded-xl border border-border bg-card p-3 shadow-sm md:p-4"
@@ -377,6 +550,8 @@ const AppAgenda = () => {
                 {selectedDay.labelFull}, {format(selectedDate, "dd/MM/yyyy", { locale: ptBR })}
               </span>
               {selectedDay.dateStr === todayStr ? " · Hoje" : ""}
+              {" · "}
+              Intervalos de {slotIntervalMinutes} min
             </p>
           </div>
           <p className="text-xs text-muted-foreground tabular-nums">
@@ -440,15 +615,23 @@ const AppAgenda = () => {
         </div>
       </section>
 
-      <CalendarView
-        date={selectedDate}
-        professionals={professionals}
-        appointments={appointments as (Appointment & { starts_at?: string | null; ends_at?: string | null })[]}
-        openingTime={openingTime}
-        closingTime={closingTime}
-        onEmptySlotClick={handleEmptySlotClick}
-        onEventClick={(appointmentId) => setEditingId(appointmentId)}
-      />
+      {agendaView === "day" && (
+        <CalendarView
+          date={selectedDate}
+          professionals={professionals}
+          appointments={
+            appointments as (Appointment & {
+              starts_at?: string | null;
+              ends_at?: string | null;
+            })[]
+          }
+          openingTime={openingTime}
+          closingTime={closingTime}
+          slotIntervalMinutes={slotIntervalMinutes}
+          onEmptySlotClick={handleEmptySlotClick}
+          onEventClick={(appointmentId) => setEditingId(appointmentId)}
+        />
+      )}
 
       <AppointmentFormModal
         open={!!newSlot}
@@ -461,6 +644,7 @@ const AppAgenda = () => {
                 professionalName: newSlot.professionalName,
                 date: newSlot.date,
                 startTime: newSlot.startTime,
+                serviceIds: newSlot.serviceIds,
               }
             : undefined
         }
@@ -472,6 +656,7 @@ const AppAgenda = () => {
         createdBy={user?.id ?? ""}
         onSubmit={(v) => createMutation.mutateAsync(v)}
         isLoading={createMutation.isPending}
+        slotIntervalMinutes={slotIntervalMinutes}
       />
 
       <AppointmentFormModal
@@ -487,80 +672,14 @@ const AppAgenda = () => {
         createdBy={user?.id ?? ""}
         onSubmit={(v) => updateMutation.mutateAsync(v)}
         onDelete={(id) => deleteMutation.mutateAsync(id)}
-        onComplete={(id) => completeMutation.mutateAsync(id)}
+        onComplete={(id, paymentMethod) =>
+          completeMutation.mutateAsync({ id, paymentMethod })
+        }
         isLoading={updateMutation.isPending}
         isDeleting={deleteMutation.isPending}
         isCompleting={completeMutation.isPending}
+        slotIntervalMinutes={slotIntervalMinutes}
       />
-
-      <Dialog open={!!completeConfirmId} onOpenChange={(o) => !o && setCompleteConfirmId(null)}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Concluir atendimento?</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3 py-2">
-          {completeConfirmAppointmentData?.data && (() => {
-            const apt = completeConfirmAppointmentData.data as Appointment & { service_ids?: string[] };
-            const serviceIds = apt.service_ids ?? [];
-            const completedServicesList = serviceIds
-              .map((id) => services.find((s) => s.id === id))
-              .filter((s): s is Service => !!s);
-            const totalValue = completedServicesList.reduce(
-              (sum, s) => sum + (Number(s.price) ?? 0),
-              0
-            );
-            return (
-              <>
-                <p className="text-sm text-muted-foreground">Serviços realizados:</p>
-                <ul className="text-sm list-disc list-inside space-y-1">
-                  {completedServicesList.length > 0 ? (
-                    completedServicesList.map((s) => (
-                      <li key={s.id}>
-                        {s.name} — R$ {Number(s.price).toFixed(2).replace(".", ",")}
-                      </li>
-                    ))
-                  ) : (
-                    <li className="text-muted-foreground">Atendimento</li>
-                  )}
-                </ul>
-                <p className="text-sm font-medium pt-2 border-t">
-                  Valor total: R$ {totalValue.toFixed(2).replace(".", ",")}
-                </p>
-                <p className="text-xs text-muted-foreground pt-2">
-                  {isAppointmentEligibleForFinancial(apt)
-                    ? "Este valor será lançado no financeiro (horário do atendimento já passou)."
-                    : "O lançamento no financeiro aparece quando o horário agendado terminar."}
-                </p>
-              </>
-            );
-          })()}
-          </div>
-          {completeConfirmId && !completeConfirmAppointmentData?.data && (
-            <p className="text-sm text-muted-foreground">Carregando...</p>
-          )}
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setCompleteConfirmId(null)}
-              disabled={completeMutation.isPending}
-            >
-              Cancelar
-            </Button>
-            <Button
-              type="button"
-              onClick={() => {
-                if (completeConfirmId) {
-                  completeMutation.mutate(completeConfirmId);
-                }
-              }}
-              disabled={completeMutation.isPending || !completeConfirmAppointmentData?.data}
-            >
-              {completeMutation.isPending ? "Concluindo..." : "Confirmar conclusão"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </PageContainer>
   );
 };

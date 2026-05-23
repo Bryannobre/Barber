@@ -31,6 +31,7 @@ export interface UpdateCompanyParams {
   owner_photo_url?: string | null;
   opening_time?: string | null;
   closing_time?: string | null;
+  booking_slot_interval_minutes?: number;
   customization_enabled?: boolean;
   dashboard_theme?: "dark" | "light" | null;
   dashboard_primary_color?: string | null;

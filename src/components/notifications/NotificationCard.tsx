@@ -1,6 +1,6 @@
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { AtSign, CheckCheck, Megaphone } from "lucide-react";
+import { AtSign, Calendar, CheckCheck, Megaphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { AppNotification } from "@/types/database.types";
@@ -19,6 +19,7 @@ export function NotificationCard({
   isMarkingRead,
 }: NotificationCardProps) {
   const isMention = notification.type === "mention";
+  const isAppointment = notification.type.startsWith("appointment_");
   const relative = formatDistanceToNow(new Date(notification.created_at), {
     addSuffix: true,
     locale: ptBR,
@@ -46,10 +47,18 @@ export function NotificationCard({
               "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg",
               isMention
                 ? "bg-amber-500/15 text-amber-700 dark:text-amber-400"
-                : "bg-sky-500/15 text-sky-700 dark:text-sky-400"
+                : isAppointment
+                  ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+                  : "bg-sky-500/15 text-sky-700 dark:text-sky-400"
             )}
           >
-            {isMention ? <AtSign className="h-5 w-5" /> : <Megaphone className="h-5 w-5" />}
+            {isMention ? (
+              <AtSign className="h-5 w-5" />
+            ) : isAppointment ? (
+              <Calendar className="h-5 w-5" />
+            ) : (
+              <Megaphone className="h-5 w-5" />
+            )}
           </div>
           <div className="min-w-0 flex-1 space-y-1">
             <div className="flex flex-wrap items-center gap-2">

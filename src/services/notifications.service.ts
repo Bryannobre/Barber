@@ -21,6 +21,7 @@ function mapNotificationRow(row: Record<string, unknown>): AppNotification {
     created_at: String(row.created_at ?? ""),
     recado_id: (row.recado_id as string | null) ?? null,
     comment_id: (row.comment_id as string | null) ?? null,
+    appointment_id: (row.appointment_id as string | null) ?? null,
   };
 }
 

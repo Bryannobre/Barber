@@ -1,5 +1,6 @@
 import { supabase } from "@/lib/supabase";
 import { requireCompanyId } from "@/lib/companyScope";
+import { getPaymentChartLabel } from "@/lib/paymentMethods";
 import type { Appointment, Service, Professional } from "@/types/database.types";
 
 export interface ReportsFilters {
@@ -60,15 +61,24 @@ export interface StatusDistribuicao {
   count: number;
 }
 
+export interface PaymentMethodReportPoint {
+  method: string;
+  value: number;
+}
+
 export interface AppointmentReportRow {
   id: string;
   date: string;
+  startTime: string;
   clientName: string;
   serviceNames: string;
   professionalName: string;
   valor: number;
   status: string;
   notes: string | null;
+  paymentMethod: string | null;
+  /** Concluído mas receita ainda não lançada no financeiro */
+  revenuePending: boolean;
 }
 
 async function getAppointmentsWithDetails(
@@ -512,22 +522,25 @@ export const reportsService = {
 
     if (error) return { data: [], total: 0, error };
 
-    const { data: financial } = await supabase
-      .from("financial_records")
-      .select("appointment_id, amount")
-      .eq("company_id", companyId)
-      .eq("is_valid", true)
-      .eq("type", "income")
-      .in(
-        "appointment_id",
-        data.map((a) => a.id).filter(Boolean)
-      );
+    const aptIdList = data.map((a) => a.id).filter(Boolean);
+    const { data: financial } =
+      aptIdList.length > 0
+        ? await supabase
+            .from("financial_records")
+            .select("appointment_id, amount, payment_method")
+            .eq("company_id", companyId)
+            .eq("is_valid", true)
+            .eq("type", "income")
+            .in("appointment_id", aptIdList)
+        : { data: [] };
 
-    const valorByApt = Object.fromEntries(
-      ((financial ?? []) as { appointment_id: string; amount: number }[]).map((r) => [
-        r.appointment_id,
-        Number(r.amount),
-      ])
+    const valorByApt: Record<string, number> = {};
+    const paymentByApt: Record<string, string | null> = {};
+    ((financial ?? []) as { appointment_id: string; amount: number; payment_method?: string | null }[]).forEach(
+      (r) => {
+        valorByApt[r.appointment_id] = Number(r.amount);
+        if (r.payment_method) paymentByApt[r.appointment_id] = r.payment_method;
+      }
     );
 
     let rows: AppointmentReportRow[] = data
@@ -535,15 +548,23 @@ export const reportsService = {
       .map((a) => {
         const serviceIds = (a.appointment_services ?? []).map((s) => s.service_id);
         const serviceNames = serviceIds.map((id) => serviceMap[id]?.name ?? "—").join(" + ") || "—";
+        const valor = valorByApt[a.id] ?? 0;
+        const paymentMethod =
+          (a as Appointment).payment_method ??
+          paymentByApt[a.id] ??
+          null;
         return {
           id: a.id,
           date: a.date,
+          startTime: String(a.start_time ?? "").slice(0, 5),
           clientName: a.client_name ?? "Cliente",
           serviceNames,
           professionalName: profMap[a.professional_id] ?? "—",
-          valor: valorByApt[a.id] ?? 0,
+          valor,
           status: a.status,
           notes: a.notes,
+          paymentMethod,
+          revenuePending: a.status === "completed" && valor <= 0,
         };
       })
       .sort((a, b) => b.date.localeCompare(a.date));
@@ -554,5 +575,56 @@ export const reportsService = {
     rows = rows.slice(offset, offset + limit);
 
     return { data: rows, total, error: null };
+  },
+
+  async getPaymentMethodsDistribution(companyId: string, filters: ReportsFilters) {
+    requireCompanyId(companyId);
+    const periodStart = `${filters.startDate}T00:00:00`;
+    const periodEnd = `${filters.endDate}T23:59:59`;
+
+    const { data, error } = await supabase
+      .from("financial_records")
+      .select("payment_method, amount, appointment_id")
+      .eq("company_id", companyId)
+      .eq("type", "income")
+      .eq("is_valid", true)
+      .gte("created_at", periodStart)
+      .lte("created_at", periodEnd);
+
+    if (error) return { data: [] as PaymentMethodReportPoint[], error };
+
+    let records = (data ?? []) as {
+      payment_method?: string | null;
+      amount: number;
+      appointment_id: string | null;
+    }[];
+
+    if (filters.professionalId || filters.serviceId) {
+      const { data: aptRows } = await getAppointmentsWithDetails(companyId, filters);
+      const aptIdSet = new Set(aptRows.map((a) => a.id));
+      records = records.filter(
+        (r) => r.appointment_id && aptIdSet.has(r.appointment_id)
+      );
+    }
+
+    const totals = new Map<string, number>();
+    records.forEach((row) => {
+      const label = getPaymentChartLabel(row.payment_method);
+      const amount = Math.abs(Number(row.amount ?? 0));
+      totals.set(label, (totals.get(label) ?? 0) + amount);
+    });
+
+    const order = ["PIX", "Dinheiro", "Cartão", "Transferência", "Outros"];
+    const result: PaymentMethodReportPoint[] = order
+      .filter((method) => (totals.get(method) ?? 0) > 0)
+      .map((method) => ({ method, value: totals.get(method) ?? 0 }));
+
+    for (const [method, value] of totals) {
+      if (!order.includes(method)) {
+        result.push({ method, value });
+      }
+    }
+
+    return { data: result, error: null };
   },
 };

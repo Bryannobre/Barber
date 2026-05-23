@@ -3,7 +3,6 @@ import type { MouseEvent } from "react";
 import { EventBlock } from "./EventBlock";
 import {
   CALENDAR_HEADER_HEIGHT_PX,
-  CLICK_ROUNDING_MINUTES,
   minutesToTime,
   roundMinutes,
 } from "./calendarUtils";
@@ -16,6 +15,8 @@ interface ProfessionalColumnProps {
   dayEndMinutes: number;
   timelinePadY: number;
   bodyHeight: number;
+  /** Alinha clique na grade ao intervalo configurado na empresa */
+  clickRoundingMinutes: number;
   onEmptyClick: (professionalId: string, startTime: string) => void;
   onEventClick: (appointmentId: string) => void;
 }
@@ -28,6 +29,7 @@ export function ProfessionalColumn({
   dayEndMinutes,
   timelinePadY,
   bodyHeight,
+  clickRoundingMinutes,
   onEmptyClick,
   onEventClick,
 }: ProfessionalColumnProps) {
@@ -37,7 +39,7 @@ export function ProfessionalColumn({
     const clickedMinutesFromStart = Math.max(0, Math.floor(relativeY / pixelsPerMinute));
     const absoluteMinutes = roundMinutes(
       dayStartMinutes + clickedMinutesFromStart,
-      CLICK_ROUNDING_MINUTES
+      clickRoundingMinutes
     );
     if (absoluteMinutes >= dayEndMinutes) return;
     onEmptyClick(professional.id, minutesToTime(absoluteMinutes));

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import PageContainer from "@/components/shared/PageContainer";
 import { Button } from "@/components/ui/button";
@@ -11,14 +11,22 @@ import { companyService } from "@/services/company.service";
 import { applyCompanyTheme } from "@/lib/companyTheme";
 import { Link } from "react-router-dom";
 import { ExternalLink, Copy, Globe, Layout } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { DEFAULT_BOOKING_SLOT_INTERVAL_MINUTES } from "@/lib/bookingDuration";
 
 const DEFAULT_OPENING_TIME = "09:00";
 const DEFAULT_CLOSING_TIME = "19:00";
 const DEFAULT_PRIMARY_COLOR = "#6fcf97";
 
-function isThirtyMinuteTime(time: string) {
+function isMinuteStep(time: string, stepMinutes: number) {
   const minutes = Number(time.split(":")[1] ?? "0");
-  return minutes === 0 || minutes === 30;
+  return minutes % stepMinutes === 0;
 }
 
 function toMinutes(time: string) {
@@ -27,16 +35,26 @@ function toMinutes(time: string) {
 }
 
 const AppSettings = () => {
+  const queryClient = useQueryClient();
   const { currentCompany, setCurrentCompany } = useTenant();
   const [openingTime, setOpeningTime] = useState(DEFAULT_OPENING_TIME);
   const [closingTime, setClosingTime] = useState(DEFAULT_CLOSING_TIME);
   const [customizationEnabled, setCustomizationEnabled] = useState(false);
   const [dashboardTheme, setDashboardTheme] = useState<"dark" | "light">("dark");
   const [dashboardPrimaryColor, setDashboardPrimaryColor] = useState(DEFAULT_PRIMARY_COLOR);
+  const [slotInterval, setSlotInterval] = useState(
+    String(DEFAULT_BOOKING_SLOT_INTERVAL_MINUTES)
+  );
 
   useEffect(() => {
     setOpeningTime((currentCompany?.opening_time ?? DEFAULT_OPENING_TIME).slice(0, 5));
     setClosingTime((currentCompany?.closing_time ?? DEFAULT_CLOSING_TIME).slice(0, 5));
+    setSlotInterval(
+      String(
+        currentCompany?.booking_slot_interval_minutes ??
+          DEFAULT_BOOKING_SLOT_INTERVAL_MINUTES
+      )
+    );
     setCustomizationEnabled(currentCompany?.customization_enabled ?? false);
     setDashboardTheme(currentCompany?.dashboard_theme ?? "dark");
     setDashboardPrimaryColor(currentCompany?.dashboard_primary_color ?? DEFAULT_PRIMARY_COLOR);
@@ -46,8 +64,15 @@ const AppSettings = () => {
     mutationFn: async () => {
       if (!currentCompany) return;
 
-      if (!isThirtyMinuteTime(openingTime) || !isThirtyMinuteTime(closingTime)) {
-        throw new Error("Os horários devem seguir intervalos de 30 minutos.");
+      const interval = Number(slotInterval);
+      if (![5, 10, 15, 30].includes(interval)) {
+        throw new Error("Intervalo de agendamento inválido.");
+      }
+
+      if (!isMinuteStep(openingTime, interval) || !isMinuteStep(closingTime, interval)) {
+        throw new Error(
+          `Abertura e fechamento devem usar múltiplos de ${interval} minutos (ex.: 09:00, 09:15).`
+        );
       }
 
       if (toMinutes(closingTime) <= toMinutes(openingTime)) {
@@ -57,12 +82,23 @@ const AppSettings = () => {
       const { data, error } = await companyService.update(currentCompany.id, {
         opening_time: openingTime,
         closing_time: closingTime,
+        booking_slot_interval_minutes: interval,
       });
       if (error) throw error;
-      if (data) setCurrentCompany(data);
+      if (data) {
+        setCurrentCompany(data);
+      } else {
+        const refreshed = await companyService.getById(currentCompany.id);
+        if (refreshed.data) setCurrentCompany(refreshed.data);
+      }
     },
     onSuccess: () => {
-      toast.success("Horário de funcionamento atualizado.");
+      queryClient.invalidateQueries({ queryKey: ["slots"] });
+      queryClient.invalidateQueries({ queryKey: ["company-booking-settings"] });
+      queryClient.invalidateQueries({ queryKey: ["appointments"] });
+      toast.success(
+        `Configuração salva. Agendamentos usarão intervalos de ${slotInterval} minutos.`
+      );
     },
     onError: (error) => {
       const fallback = "Não foi possível salvar o horário de funcionamento.";
@@ -204,7 +240,7 @@ const AppSettings = () => {
               <Label>Abertura</Label>
               <Input
                 type="time"
-                step={1800}
+                step={Number(slotInterval) * 60}
                 value={openingTime}
                 onChange={(e) => setOpeningTime(e.target.value)}
                 className="mt-1"
@@ -214,21 +250,39 @@ const AppSettings = () => {
               <Label>Fechamento</Label>
               <Input
                 type="time"
-                step={1800}
+                step={Number(slotInterval) * 60}
                 value={closingTime}
                 onChange={(e) => setClosingTime(e.target.value)}
                 className="mt-1"
               />
             </div>
           </div>
+          <div>
+            <Label>Intervalo entre horários de agendamento</Label>
+            <Select value={slotInterval} onValueChange={setSlotInterval}>
+              <SelectTrigger className="mt-1 max-w-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="5">5 minutos (ex.: 09:00, 09:05…)</SelectItem>
+                <SelectItem value="10">10 minutos</SelectItem>
+                <SelectItem value="15">15 minutos (recomendado)</SelectItem>
+                <SelectItem value="30">30 minutos</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground mt-1">
+              Define os horários que o cliente pode escolher na landing e no app.
+            </p>
+          </div>
           <p className="text-xs text-muted-foreground">
-            Esses horários impactam diretamente os agendamentos disponíveis (sempre em blocos de 30 minutos).
+            Abertura e fechamento limitam a janela do dia; o intervalo define o passo entre cada
+            horário oferecido.
           </p>
           <Button
             onClick={() => saveBusinessHoursMutation.mutate()}
             disabled={!currentCompany || saveBusinessHoursMutation.isPending}
           >
-            {saveBusinessHoursMutation.isPending ? "Salvando..." : "Salvar"}
+            {saveBusinessHoursMutation.isPending ? "Salvando..." : "Salvar horários e intervalo"}
           </Button>
         </div>
 

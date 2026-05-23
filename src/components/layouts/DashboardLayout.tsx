@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTenant } from "@/contexts/TenantContext";
 import { RouteErrorBoundary } from "@/components/shared/RouteErrorBoundary";
 import { NotificationsBell } from "@/components/notifications/NotificationsBell";
+import { GlobalSearchDialog } from "@/components/app/GlobalSearchDialog";
 import { useNotificationsRealtime } from "@/hooks/useNotificationsRealtime";
 import { useAuth } from "@/hooks/useAuth";
 import { useCompanyPageAccess, type AppPageKey } from "@/hooks/useCompanyPageAccess";
@@ -105,6 +106,7 @@ const DashboardLayout = () => {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const location = useLocation();
   const { currentCompany, setCurrentCompany } = useTenant();
   const { profile, user, signOut } = useAuth();
@@ -143,6 +145,17 @@ const DashboardLayout = () => {
     hasAccessToPage("notifications") ? currentCompany?.id : undefined,
     hasAccessToPage("notifications")
   );
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        if (currentCompany?.id) setSearchOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [currentCompany?.id]);
 
   const handleRefresh = useCallback(async () => {
     if (!currentCompany?.id || refreshing) return;
@@ -474,22 +487,37 @@ const DashboardLayout = () => {
           </div>
 
           <div className="hidden flex-1 items-center justify-center px-2 lg:flex">
-            <div className="relative w-full max-w-md">
+            <button
+              type="button"
+              onClick={() => setSearchOpen(true)}
+              disabled={!currentCompany?.id}
+              className="relative w-full max-w-md text-left"
+              aria-label="Abrir busca global (Ctrl+K)"
+            >
               <Search
                 className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
                 aria-hidden
               />
-              <Input
-                readOnly
-                tabIndex={-1}
-                placeholder="Busca global (em breve)"
-                className="h-9 cursor-default bg-background/80 pl-9 text-sm"
-                aria-label="Busca global — em breve"
-              />
-            </div>
+              <span className="flex h-9 w-full items-center rounded-md border border-input bg-background/80 pl-9 pr-16 text-sm text-muted-foreground">
+                Buscar cliente, agendamento…
+              </span>
+              <kbd className="pointer-events-none absolute right-2 top-1/2 hidden -translate-y-1/2 rounded border border-border bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground sm:inline">
+                Ctrl+K
+              </kbd>
+            </button>
           </div>
 
           <div className="flex shrink-0 items-center justify-end gap-1 sm:gap-2">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="lg:hidden shrink-0 text-muted-foreground"
+              onClick={() => setSearchOpen(true)}
+              disabled={!currentCompany?.id}
+              aria-label="Buscar"
+            >
+              <Search className="size-[18px]" />
+            </Button>
             {hasAccessToPage("notifications") && (
               <NotificationsBell companyId={currentCompany?.id} />
             )}
@@ -504,13 +532,13 @@ const DashboardLayout = () => {
             >
               <RefreshCw className={cn("size-[18px]", refreshing && "animate-spin")} />
             </Button>
-            <Link to="/app/agenda" className="hidden sm:block">
+            <Link to="/app/agenda?new=1" className="hidden sm:block">
               <Button size="sm" className="whitespace-nowrap shadow-sm">
                 <Plus className="mr-1.5 size-4" />
                 Novo agendamento
               </Button>
             </Link>
-            <Link to="/app/agenda" className="sm:hidden">
+            <Link to="/app/agenda?new=1" className="sm:hidden">
               <Button size="icon" className="shadow-sm" aria-label="Novo agendamento">
                 <Plus className="size-4" />
               </Button>
@@ -544,6 +572,14 @@ const DashboardLayout = () => {
           )}
         </main>
       </div>
+
+      {currentCompany?.id && (
+        <GlobalSearchDialog
+          companyId={currentCompany.id}
+          open={searchOpen}
+          onOpenChange={setSearchOpen}
+        />
+      )}
     </div>
   );
 };

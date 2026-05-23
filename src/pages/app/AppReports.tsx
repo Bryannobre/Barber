@@ -1,4 +1,5 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
+import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import PageContainer from "@/components/shared/PageContainer";
 import CardWidget from "@/components/shared/CardWidget";
@@ -51,22 +52,31 @@ import {
   XCircle,
   Percent,
   Download,
+  Loader2,
   Package,
   Wallet,
+  FileText,
 } from "lucide-react";
+import type { ReportExportParams } from "@/lib/reportsExport";
+import {
+  PDF_REQUIRES_HTTPS_MESSAGE,
+  createPdfObjectUrl,
+  isPdfExportSecureContext,
+  revokePdfObjectUrl,
+} from "@/lib/reportPdfSecure";
 import { useTenant } from "@/contexts/TenantContext";
 import { reportsService } from "@/services/reports.service";
 import { professionalService } from "@/services/professional.service";
 import { serviceService } from "@/services/service.service";
 import {
   format,
+  parseISO,
   subDays,
   startOfMonth,
   endOfMonth,
   subMonths,
-  startOfDay,
-  endOfDay,
 } from "date-fns";
+import { getPaymentMethodLabel } from "@/lib/paymentMethods";
 import { ptBR } from "date-fns/locale";
 
 const QUICK_FILTERS = [
@@ -122,7 +132,26 @@ const STATUS_LABELS: Record<string, string> = {
   no_show: "Não compareceu",
 };
 
-const COLORS = ["#3b82f6", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6", "#ec4899"];
+const CHART_COLORS = [
+  "hsl(var(--primary))",
+  "hsl(142 76% 36%)",
+  "hsl(221 83% 53%)",
+  "hsl(38 92% 50%)",
+  "hsl(var(--muted-foreground))",
+  "hsl(280 65% 55%)",
+];
+
+function formatCurrency(value: number) {
+  return `R$ ${value.toFixed(2).replace(".", ",")}`;
+}
+
+function formatChartDate(dateStr: string) {
+  try {
+    return format(parseISO(dateStr), "dd/MM");
+  } catch {
+    return dateStr;
+  }
+}
 
 const AppReports = () => {
   const { currentCompany } = useTenant();
@@ -139,6 +168,13 @@ const AppReports = () => {
   const [serviceId, setServiceId] = useState<string>(ALL_VALUE);
   const [page, setPage] = useState(0);
   const [exportModalOpen, setExportModalOpen] = useState(false);
+  const [pdfPreviewOpen, setPdfPreviewOpen] = useState(false);
+  const [pdfGenerating, setPdfGenerating] = useState(false);
+  const [pdfPreview, setPdfPreview] = useState<{
+    url: string;
+    filename: string;
+    blob: Blob;
+  } | null>(null);
 
   const toFilterId = (v: string) => (v && v !== "__all__" ? v : undefined);
   const filters = useMemo(() => {
@@ -219,6 +255,12 @@ const AppReports = () => {
     enabled: !!companyId,
   });
 
+  const { data: paymentMethodsData, isLoading: paymentMethodsLoading } = useQuery({
+    queryKey: ["reports-payment-methods", companyId, filters],
+    queryFn: () => reportsService.getPaymentMethodsDistribution(companyId, filters),
+    enabled: !!companyId,
+  });
+
   const metrics = metricsData?.data ?? {
     faturamentoTotal: 0,
     faturamentoServicos: 0,
@@ -229,8 +271,14 @@ const AppReports = () => {
     servicosRealizados: 0,
     cancelamentos: 0,
     taxaConversao: 0,
+    agendamentosConcluidos: 0,
   };
-  const faturamentoPorPeriodo = faturamentoData?.data ?? [];
+  const faturamentoRaw = faturamentoData?.data ?? [];
+  const faturamentoPorPeriodo = faturamentoRaw.map((item) => ({
+    ...item,
+    dateLabel: formatChartDate(item.date),
+  }));
+  const paymentMethodsChart = paymentMethodsData?.data ?? [];
   const servicosMaisVendidos = servicosData?.data ?? [];
   const rankingProfissionais = rankingData?.data ?? [];
   const horariosMaisMovimentados = horariosData?.data ?? [];
@@ -248,35 +296,104 @@ const AppReports = () => {
     }
   };
 
-  const handleExport = async (format: "pdf" | "excel") => {
-    // Carrega libs de exportação sob demanda para não pesar o chunk inicial de relatórios
-    const { exportReportPDF, exportReportExcel } = await import("@/lib/reportsExport");
+  const companyLogoUrl =
+    currentCompany?.logo_url?.trim() || currentCompany?.logo?.trim() || null;
 
-    if (format === "pdf") {
-      exportReportPDF({
-        companyName,
-        startDate: filters.startDate,
-        endDate: filters.endDate,
-        metrics,
-        faturamentoPorPeriodo,
-        servicosMaisVendidos,
-        produtividade,
+  const getExportParams = useCallback((): ReportExportParams => {
+    return {
+      companyName,
+      startDate: filters.startDate,
+      endDate: filters.endDate,
+      metrics,
+      faturamentoPorPeriodo: faturamentoRaw,
+      servicosMaisVendidos,
+      produtividade,
+      statusDistribuicao,
+      tableRows,
+      branding: {
+        primaryHex: currentCompany?.dashboard_primary_color ?? "#6fcf97",
+        logoUrl: companyLogoUrl,
+        customizationEnabled: currentCompany?.customization_enabled ?? false,
+      },
+      charts: {
+        faturamentoPorPeriodo: faturamentoRaw,
+        horariosMaisMovimentados,
+        paymentMethods: paymentMethodsChart,
         statusDistribuicao,
-        tableRows,
-      });
-    } else {
-      exportReportExcel({
-        companyName,
-        startDate: filters.startDate,
-        endDate: filters.endDate,
-        metrics,
-        faturamentoPorPeriodo,
-        servicosMaisVendidos,
-        produtividade,
-        statusDistribuicao,
-        tableRows,
-      });
+      },
+    };
+  }, [
+    companyName,
+    filters.startDate,
+    filters.endDate,
+    metrics,
+    faturamentoRaw,
+    servicosMaisVendidos,
+    produtividade,
+    statusDistribuicao,
+    tableRows,
+    currentCompany?.dashboard_primary_color,
+    currentCompany?.customization_enabled,
+    companyLogoUrl,
+    horariosMaisMovimentados,
+    paymentMethodsChart,
+  ]);
+
+  const pdfSecure = isPdfExportSecureContext();
+
+  const closePdfPreview = useCallback(() => {
+    setPdfPreview((prev) => {
+      revokePdfObjectUrl(prev?.url);
+      return null;
+    });
+    setPdfPreviewOpen(false);
+  }, []);
+
+  useEffect(() => {
+    return () => revokePdfObjectUrl(pdfPreview?.url);
+  }, [pdfPreview?.url]);
+
+  const handlePreviewPdf = async () => {
+    if (!pdfSecure) {
+      toast.error(PDF_REQUIRES_HTTPS_MESSAGE);
+      return;
     }
+    setPdfGenerating(true);
+    try {
+      const { buildReportPdfBlob } = await import("@/lib/reportsExport");
+      const { blob, filename } = await buildReportPdfBlob(getExportParams());
+      const url = createPdfObjectUrl(blob);
+      setPdfPreview((prev) => {
+        revokePdfObjectUrl(prev?.url);
+        return { url, filename, blob };
+      });
+      setExportModalOpen(false);
+      setPdfPreviewOpen(true);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Não foi possível gerar o PDF.");
+    } finally {
+      setPdfGenerating(false);
+    }
+  };
+
+  const handleDownloadPdfPreview = () => {
+    if (!pdfPreview) return;
+    if (!pdfSecure) {
+      toast.error(PDF_REQUIRES_HTTPS_MESSAGE);
+      return;
+    }
+    void import("@/lib/reportsExport")
+      .then(({ downloadReportPdf }) =>
+        downloadReportPdf(pdfPreview.blob, pdfPreview.filename)
+      )
+      .catch((e: unknown) =>
+        toast.error(e instanceof Error ? e.message : "Não foi possível baixar o PDF.")
+      );
+  };
+
+  const handleExportExcel = async () => {
+    const { exportReportExcel } = await import("@/lib/reportsExport");
+    exportReportExcel(getExportParams());
     setExportModalOpen(false);
   };
 
@@ -373,46 +490,73 @@ const AppReports = () => {
         </div>
 
         {/* 2. Cards de métricas */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
+        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-3 gap-3 mb-3">
           {metricsLoading ? (
-            Array.from({ length: 6 }).map((_, i) => (
-              <Skeleton key={i} className="h-28 rounded-xl" />
+            Array.from({ length: 9 }).map((_, i) => (
+              <Skeleton key={i} className="h-24 rounded-xl" />
             ))
           ) : (
             <>
               <CardWidget
                 title="Faturamento serviços"
-                value={`R$ ${(metrics.faturamentoServicos ?? 0).toFixed(2)}`}
+                value={formatCurrency(metrics.faturamentoServicos ?? 0)}
                 icon={Scissors}
               />
               <CardWidget
                 title="Faturamento produtos"
-                value={`R$ ${(metrics.faturamentoProdutos ?? 0).toFixed(2)}`}
+                value={formatCurrency(metrics.faturamentoProdutos ?? 0)}
                 icon={Package}
               />
               <CardWidget
                 title="Faturamento total"
-                value={`R$ ${(metrics.faturamentoTotal ?? 0).toFixed(2)}`}
+                value={formatCurrency(metrics.faturamentoTotal ?? 0)}
                 icon={DollarSign}
-              />
-              <CardWidget
-                title="Lucro estimado"
-                value={`R$ ${(metrics.lucroEstimado ?? 0).toFixed(2)}`}
-                icon={Wallet}
-              />
-              <CardWidget
-                title="Total agendamentos"
-                value={String(metrics.totalAgendamentos)}
-                icon={Calendar}
-              />
-              <CardWidget
-                title="Ticket médio"
-                value={`R$ ${(metrics.ticketMedio ?? 0).toFixed(2)}`}
-                icon={TrendingUp}
               />
             </>
           )}
         </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3 mb-2">
+          {!metricsLoading && (
+            <>
+              <CardWidget
+                title="Lucro estimado"
+                value={formatCurrency(metrics.lucroEstimado ?? 0)}
+                icon={Wallet}
+              />
+              <CardWidget
+                title="Agendamentos"
+                value={String(metrics.totalAgendamentos)}
+                icon={Calendar}
+              />
+              <CardWidget
+                title="Concluídos"
+                value={String(metrics.agendamentosConcluidos ?? 0)}
+                icon={TrendingUp}
+              />
+              <CardWidget
+                title="Cancelamentos"
+                value={String(metrics.cancelamentos ?? 0)}
+                icon={XCircle}
+              />
+              <CardWidget
+                title="Taxa de conversão"
+                value={`${(metrics.taxaConversao ?? 0).toFixed(1)}%`}
+                icon={Percent}
+              />
+              <CardWidget
+                title="Ticket médio"
+                value={formatCurrency(metrics.ticketMedio ?? 0)}
+                icon={DollarSign}
+              />
+            </>
+          )}
+        </div>
+        {!metricsLoading && (
+          <p className="text-xs text-muted-foreground mb-6">
+            Lucro estimado = entradas − saídas no período (lançamentos válidos no financeiro).
+            Taxa de conversão = concluídos ÷ confirmados no período.
+          </p>
+        )}
 
         {!hasData && !metricsLoading && (
           <div className="bg-card border border-border rounded-xl p-12 text-center text-muted-foreground mb-6">
@@ -433,10 +577,25 @@ const AppReports = () => {
                 <ResponsiveContainer width="100%" height={220}>
                   <LineChart data={faturamentoPorPeriodo}>
                     <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                    <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                    <XAxis
+                      dataKey="dateLabel"
+                      stroke="hsl(var(--muted-foreground))"
+                      fontSize={12}
+                    />
                     <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                    <Tooltip formatter={(v: number) => [`R$ ${v.toFixed(2)}`, "Faturamento"]} />
-                    <Line type="monotone" dataKey="valor" stroke="#3b82f6" strokeWidth={2} />
+                    <Tooltip
+                      formatter={(v: number) => [formatCurrency(v), "Faturamento"]}
+                      labelFormatter={(_, payload) => {
+                        const raw = payload?.[0]?.payload?.date as string | undefined;
+                        return raw ? formatChartDate(raw) : "";
+                      }}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="valor"
+                      stroke="hsl(var(--primary))"
+                      strokeWidth={2}
+                    />
                   </LineChart>
                 </ResponsiveContainer>
               )}
@@ -453,8 +612,45 @@ const AppReports = () => {
                     <XAxis dataKey="hora" stroke="hsl(var(--muted-foreground))" fontSize={12} />
                     <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
                     <Tooltip formatter={(v: number) => [v, "Atendimentos"]} />
-                    <Bar dataKey="count" fill="#10b981" name="Atendimentos" radius={[4, 4, 0, 0]} />
+                    <Bar
+                      dataKey="count"
+                      fill="hsl(var(--primary))"
+                      name="Atendimentos"
+                      radius={[4, 4, 0, 0]}
+                    />
                   </BarChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+
+            <div className="bg-card border border-border rounded-xl p-5">
+              <h3 className="font-semibold mb-4">Formas de pagamento</h3>
+              {paymentMethodsLoading ? (
+                <Skeleton className="h-[220px] w-full" />
+              ) : paymentMethodsChart.length === 0 ? (
+                <p className="text-muted-foreground text-sm py-8 text-center">
+                  Sem receitas no período. Conclua atendimentos informando a forma de pagamento.
+                </p>
+              ) : (
+                <ResponsiveContainer width="100%" height={220}>
+                  <PieChart>
+                    <Pie
+                      data={paymentMethodsChart}
+                      dataKey="value"
+                      nameKey="method"
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={45}
+                      outerRadius={75}
+                      paddingAngle={2}
+                    >
+                      {paymentMethodsChart.map((_, i) => (
+                        <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip formatter={(v: number) => [formatCurrency(v), "Receita"]} />
+                    <Legend />
+                  </PieChart>
                 </ResponsiveContainer>
               )}
             </div>
@@ -482,7 +678,7 @@ const AppReports = () => {
                       label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
                     >
                       {statusDistribuicao.map((_, i) => (
-                        <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                        <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
                       ))}
                     </Pie>
                     <Tooltip formatter={(v: number) => [v, "Quantidade"]} />
@@ -560,8 +756,14 @@ const AppReports = () => {
 
         {/* 5. Tabela detalhada de agendamentos */}
         <div className="bg-card border border-border rounded-xl overflow-hidden mb-6">
-          <h3 className="font-semibold p-5 pb-0">Tabela detalhada de agendamentos</h3>
-          <div className="p-5">
+          <div className="p-5 pb-0">
+            <h3 className="font-semibold">Tabela detalhada de agendamentos</h3>
+            <p className="text-xs text-muted-foreground mt-1">
+              Pagamento vem do atendimento concluído ou do lançamento no financeiro. Valor R$ 0 em
+              concluídos indica receita pendente (após o horário do atendimento).
+            </p>
+          </div>
+          <div className="p-5 pt-3">
             {tableLoading ? (
               <Skeleton className="h-64 w-full" />
             ) : tableRows.length === 0 ? (
@@ -574,6 +776,7 @@ const AppReports = () => {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Data</TableHead>
+                      <TableHead>Horário</TableHead>
                       <TableHead>Cliente</TableHead>
                       <TableHead>Serviço</TableHead>
                       <TableHead>Funcionário</TableHead>
@@ -586,14 +789,27 @@ const AppReports = () => {
                   <TableBody>
                     {tableRows.map((r) => (
                       <TableRow key={r.id}>
-                        <TableCell>{r.date}</TableCell>
+                        <TableCell className="whitespace-nowrap tabular-nums">
+                          {formatChartDate(r.date)}
+                        </TableCell>
+                        <TableCell className="tabular-nums">{r.startTime || "—"}</TableCell>
                         <TableCell>{r.clientName}</TableCell>
                         <TableCell>{r.serviceNames}</TableCell>
                         <TableCell>{r.professionalName}</TableCell>
-                        <TableCell className="text-right">
-                          R$ {r.valor.toFixed(2)}
+                        <TableCell className="text-right tabular-nums">
+                          {r.revenuePending ? (
+                            <span className="text-muted-foreground text-xs" title="Receita pendente">
+                              Pendente
+                            </span>
+                          ) : (
+                            formatCurrency(r.valor)
+                          )}
                         </TableCell>
-                        <TableCell className="text-muted-foreground">—</TableCell>
+                        <TableCell className="text-sm">
+                          {r.paymentMethod
+                            ? getPaymentMethodLabel(r.paymentMethod)
+                            : "—"}
+                        </TableCell>
                         <TableCell>{STATUS_LABELS[r.status] ?? r.status}</TableCell>
                         <TableCell className="max-w-[150px] truncate text-muted-foreground">
                           {r.notes ?? "—"}
@@ -637,14 +853,78 @@ const AppReports = () => {
             <DialogTitle>Exportar Relatório</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            Exportar relatório do período {filters.startDate} a {filters.endDate}
+            Período {filters.startDate} a {filters.endDate}. O PDF pode ser visualizado antes
+            do download.
           </p>
-          <DialogFooter>
+          {!pdfSecure && (
+            <p className="text-sm text-amber-600 dark:text-amber-500">
+              {PDF_REQUIRES_HTTPS_MESSAGE} O Excel continua disponível nesta conexão.
+            </p>
+          )}
+          <DialogFooter className="flex-col gap-2 sm:flex-row">
             <Button variant="outline" onClick={() => setExportModalOpen(false)}>
               Cancelar
             </Button>
-            <Button onClick={() => void handleExport("pdf")}>Exportar PDF</Button>
-            <Button onClick={() => void handleExport("excel")}>Exportar Excel</Button>
+            <Button
+              onClick={() => void handlePreviewPdf()}
+              disabled={pdfGenerating || !pdfSecure}
+              title={!pdfSecure ? PDF_REQUIRES_HTTPS_MESSAGE : undefined}
+            >
+              {pdfGenerating ? (
+                <Loader2 size={16} className="mr-2 animate-spin" />
+              ) : (
+                <FileText size={16} className="mr-2" />
+              )}
+              Visualizar PDF
+            </Button>
+            <Button variant="secondary" onClick={() => void handleExportExcel()}>
+              <Download size={16} className="mr-2" />
+              Exportar Excel
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={pdfPreviewOpen}
+        onOpenChange={(open) => {
+          if (!open) closePdfPreview();
+          else setPdfPreviewOpen(true);
+        }}
+      >
+        <DialogContent className="max-w-4xl w-[95vw] h-[90vh] flex flex-col gap-0 p-0 overflow-hidden">
+          <DialogHeader className="px-6 pt-6 pb-3 shrink-0">
+            <DialogTitle>Pré-visualização do relatório</DialogTitle>
+            <p className="text-sm text-muted-foreground font-normal">
+              {filters.startDate} a {filters.endDate}
+              {pdfPreview?.filename ? ` · ${pdfPreview.filename}` : ""}
+            </p>
+          </DialogHeader>
+          <div className="flex-1 min-h-0 px-6 pb-3">
+            {pdfPreview?.url ? (
+              <iframe
+                title="Pré-visualização do PDF do relatório"
+                src={pdfPreview.url}
+                className="w-full h-full min-h-[60vh] rounded-lg border border-border bg-muted/30"
+              />
+            ) : (
+              <div className="flex items-center justify-center h-full min-h-[40vh] text-muted-foreground text-sm">
+                Gerando documento…
+              </div>
+            )}
+          </div>
+          <DialogFooter className="px-6 py-4 border-t border-border shrink-0">
+            <Button variant="outline" onClick={closePdfPreview}>
+              Fechar
+            </Button>
+            <Button
+              onClick={handleDownloadPdfPreview}
+              disabled={!pdfPreview || !pdfSecure}
+              title={!pdfSecure ? PDF_REQUIRES_HTTPS_MESSAGE : undefined}
+            >
+              <Download size={16} className="mr-2" />
+              Baixar PDF
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -16,11 +16,15 @@ import {
   Line,
   BarChart,
   Bar,
+  PieChart,
+  Pie,
+  Cell,
   XAxis,
   YAxis,
   CartesianGrid,
   ResponsiveContainer,
   Tooltip,
+  Legend,
 } from "recharts";
 import { useTenant } from "@/contexts/TenantContext";
 import { dashboardService, getDashboardRange, type DashboardRangeKey } from "@/services/dashboard.service";
@@ -81,6 +85,12 @@ const AppDashboard = () => {
     enabled: !!companyId && !!summaryRes,
   });
 
+  const { data: paymentsRes, isLoading: paymentsLoading } = useQuery({
+    queryKey: ["dashboard-payments", companyId, range],
+    queryFn: () => dashboardService.getPayments(companyId, range),
+    enabled: !!companyId,
+  });
+
   const { data: activityRes, isLoading: activityLoading } = useQuery({
     queryKey: ["dashboard-activity", companyId, range],
     queryFn: () => dashboardService.getRecentActivity(companyId, range),
@@ -102,7 +112,16 @@ const AppDashboard = () => {
   };
   const revenue = revenueRes?.data ?? [];
   const topServices = servicesRes?.data ?? [];
+  const paymentMethods = paymentsRes?.data ?? [];
   const activity = activityRes?.data ?? [];
+
+  const PAYMENT_CHART_COLORS = [
+    "hsl(var(--primary))",
+    "hsl(142 76% 36%)",
+    "hsl(221 83% 53%)",
+    "hsl(38 92% 50%)",
+    "hsl(var(--muted-foreground))",
+  ];
   const performance = performanceRes?.data ?? {
     goal: {
       goalType: "weekly" as const,
@@ -332,14 +351,39 @@ const AppDashboard = () => {
 
         <div className="bg-card border border-border rounded-xl p-5 shadow-sm">
           <h3 className="font-semibold mb-4">Formas de Pagamento</h3>
-          <div className="h-[250px] rounded-lg border border-dashed border-border bg-muted/20 flex items-center justify-center text-center p-4">
-            <div>
-              <p className="font-medium">Futuro</p>
-              <p className="text-sm text-muted-foreground mt-1">
-                A análise de formas de pagamento será implementada em uma próxima etapa.
-              </p>
-            </div>
-          </div>
+          {paymentsLoading ? (
+            <Skeleton className="h-[250px] w-full rounded-lg" />
+          ) : paymentMethods.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-8 text-center h-[250px] flex items-center justify-center">
+              Sem receitas no período. Conclua atendimentos informando a forma de pagamento.
+            </p>
+          ) : (
+            <ResponsiveContainer width="100%" height={250}>
+              <PieChart>
+                <Pie
+                  data={paymentMethods}
+                  dataKey="value"
+                  nameKey="method"
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={50}
+                  outerRadius={80}
+                  paddingAngle={2}
+                >
+                  {paymentMethods.map((_, index) => (
+                    <Cell
+                      key={`cell-${index}`}
+                      fill={PAYMENT_CHART_COLORS[index % PAYMENT_CHART_COLORS.length]}
+                    />
+                  ))}
+                </Pie>
+                <Tooltip
+                  formatter={(v: number) => [formatCurrency(v), "Receita"]}
+                />
+                <Legend />
+              </PieChart>
+            </ResponsiveContainer>
+          )}
         </div>
       </div>
 

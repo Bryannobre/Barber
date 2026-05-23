@@ -4,28 +4,26 @@ import { useTenant } from "@/contexts/TenantContext";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
 import { bookingService } from "@/services/booking.service";
-import { Calendar, Clock } from "lucide-react";
+import { Calendar, Clock, Bell } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import {
+  getClientReminderCopy,
+  getNextClientAppointment,
+} from "@/lib/clientAppointmentReminder";
 
 const ClientHome = () => {
   const { user, profile } = useAuth();
   const { currentCompany } = useTenant();
   const { data: appointmentsData } = useQuery({
     queryKey: ["appointments-client", user?.id],
-    queryFn: () => bookingService.listByClient(user!.id),
+    queryFn: () => bookingService.listMyAppointments(user!.id),
     enabled: !!user?.id,
   });
 
-  const appointments = appointmentsData?.data ?? [];
-  const today = format(new Date(), "yyyy-MM-dd");
-  const upcomingAppointments = appointments
-    .filter((a) => a.date >= today)
-    .sort((a, b) => {
-      if (a.date !== b.date) return a.date.localeCompare(b.date);
-      return (a.start_time ?? "").localeCompare(b.start_time ?? "");
-    })
-    .slice(0, 3);
+  const upcomingAppointments = (appointmentsData?.upcoming ?? []).slice(0, 3);
+  const nextAppointment = getNextClientAppointment(appointmentsData?.upcoming ?? []);
+  const nextReminder = nextAppointment ? getClientReminderCopy(nextAppointment) : null;
   const bookingPath = currentCompany?.slug
     ? `/client/booking?company=${currentCompany.slug}`
     : "/client/booking";
@@ -46,6 +44,26 @@ const ClientHome = () => {
           </Button>
         </Link>
       </div>
+
+      {nextAppointment && nextReminder && (
+        <section
+          className="rounded-xl border border-primary/30 bg-primary/5 p-4 md:p-5"
+          aria-label="Próximo horário"
+        >
+          <div className="flex items-start gap-3">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-primary/15 text-primary">
+              <Bell size={22} aria-hidden />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-medium uppercase tracking-wide text-primary/80">
+                Lembrete
+              </p>
+              <p className="text-lg font-semibold mt-0.5">{nextReminder.title}</p>
+              <p className="text-sm text-muted-foreground">{nextReminder.subtitle}</p>
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* Próximos agendamentos */}
       <section>
@@ -84,7 +102,7 @@ const ClientHome = () => {
         )}
       </section>
 
-      {(upcomingAppointments.length > 0 || appointments.length > 0) && (
+      {upcomingAppointments.length > 0 && (
         <Link to="/client/appointments" className="block">
           <Button variant="outline" className="w-full sm:w-auto sm:min-w-[240px] h-auto py-4 flex items-center justify-center gap-2">
             <Clock size={20} />

@@ -4,10 +4,11 @@ import { ProfessionalColumn } from "./ProfessionalColumn";
 import {
   CALENDAR_HEADER_HEIGHT_PX,
   CALENDAR_TIMELINE_PAD_Y,
-  PIXELS_PER_MINUTE,
+  formatMinutesLabel,
   getMinutesFromMidnight,
   isSameLocalDate,
   parseAppointmentStart,
+  resolveTimelinePixelsPerMinute,
   timeToMinutes,
 } from "./calendarUtils";
 import { cn } from "@/lib/utils";
@@ -18,6 +19,8 @@ interface CalendarViewProps {
   appointments: (Appointment & { starts_at?: string | null; ends_at?: string | null })[];
   openingTime: string;
   closingTime: string;
+  /** Passo da grade e do clique (5, 10, 15 ou 30 min) */
+  slotIntervalMinutes: number;
   pixelsPerMinute?: number;
   onEmptySlotClick: (payload: { professionalId: string; date: string; startTime: string }) => void;
   onEventClick: (appointmentId: string) => void;
@@ -39,19 +42,25 @@ export function CalendarView({
   appointments,
   openingTime,
   closingTime,
-  pixelsPerMinute = PIXELS_PER_MINUTE,
+  slotIntervalMinutes,
+  pixelsPerMinute: pixelsPerMinuteProp,
   onEmptySlotClick,
   onEventClick,
 }: CalendarViewProps) {
   const dateStr = format(date, "yyyy-MM-dd");
   const dayStartMinutes = timeToMinutes(openingTime);
   const dayEndMinutes = timeToMinutes(closingTime);
+  const slotStep = Math.max(1, slotIntervalMinutes);
+  const pixelsPerMinute =
+    pixelsPerMinuteProp ?? resolveTimelinePixelsPerMinute(slotStep);
   const totalMinutes = Math.max(dayEndMinutes - dayStartMinutes, 0);
   const timelineHeight = totalMinutes * pixelsPerMinute;
   const bodyHeight = timelineHeight + CALENDAR_TIMELINE_PAD_Y * 2;
-  const hourMarks = Array.from(
-    { length: Math.ceil(totalMinutes / 60) + 1 },
-    (_, i) => dayStartMinutes + i * 60
+  const timeColumnWidth = slotStep <= 5 ? "5.75rem" : slotStep <= 10 ? "5.25rem" : "4.5rem";
+
+  const slotMarks = Array.from(
+    { length: Math.floor(totalMinutes / slotStep) + 1 },
+    (_, i) => dayStartMinutes + i * slotStep
   ).filter((m) => m <= dayEndMinutes);
 
   const appointmentsByProfessional = professionals.reduce<
@@ -84,29 +93,37 @@ export function CalendarView({
           style={{ minWidth: minTableWidth }}
         >
           {/* Coluna de horários */}
-          <div className="sticky left-0 z-30 w-[4.5rem] shrink-0 border-r border-border bg-card">
+          <div
+            className="sticky left-0 z-30 shrink-0 border-r border-border bg-card"
+            style={{ width: timeColumnWidth }}
+          >
             <div
               className="sticky top-0 z-40 shrink-0 border-b border-border bg-muted/95 backdrop-blur-sm"
               style={{ height: CALENDAR_HEADER_HEIGHT_PX }}
             />
             <div className="relative bg-card" style={{ height: bodyHeight }}>
-              {hourMarks.map((minutes) => (
-                <div
-                  key={minutes}
-                  className={cn(
-                    "absolute left-0 right-0 pr-2 text-right text-xs font-medium tabular-nums text-muted-foreground",
-                    hourLabelPositionClass(minutes, dayStartMinutes, dayEndMinutes)
-                  )}
-                  style={{
-                    top:
-                      CALENDAR_TIMELINE_PAD_Y +
-                      (minutes - dayStartMinutes) * pixelsPerMinute,
-                  }}
-                >
-                  {String(Math.floor(minutes / 60)).padStart(2, "0")}:
-                  {String(minutes % 60).padStart(2, "0")}
-                </div>
-              ))}
+              {slotMarks.map((minutes) => {
+                const isFullHour = minutes % 60 === 0;
+                return (
+                  <div
+                    key={`label-${minutes}`}
+                    className={cn(
+                      "absolute left-0 right-0 pr-1.5 text-right tabular-nums leading-none",
+                      isFullHour
+                        ? "text-xs font-semibold text-foreground"
+                        : "text-[10px] font-medium text-muted-foreground",
+                      hourLabelPositionClass(minutes, dayStartMinutes, dayEndMinutes)
+                    )}
+                    style={{
+                      top:
+                        CALENDAR_TIMELINE_PAD_Y +
+                        (minutes - dayStartMinutes) * pixelsPerMinute,
+                    }}
+                  >
+                    {formatMinutesLabel(minutes)}
+                  </div>
+                );
+              })}
             </div>
           </div>
 
@@ -122,10 +139,15 @@ export function CalendarView({
                 height: bodyHeight,
               }}
             >
-              {hourMarks.map((minutes) => (
+              {slotMarks.map((minutes) => (
                 <div
                   key={`line-${minutes}`}
-                  className="absolute left-0 right-0 border-t border-dashed border-border/80"
+                  className={cn(
+                    "absolute left-0 right-0 border-t",
+                    minutes % 60 === 0
+                      ? "border-dashed border-border/80"
+                      : "border-border/35"
+                  )}
                   style={{
                     top:
                       CALENDAR_TIMELINE_PAD_Y +
@@ -150,6 +172,7 @@ export function CalendarView({
                   dayEndMinutes={dayEndMinutes}
                   timelinePadY={CALENDAR_TIMELINE_PAD_Y}
                   bodyHeight={bodyHeight}
+                  clickRoundingMinutes={slotIntervalMinutes}
                   onEmptyClick={(professionalId, startTime) =>
                     onEmptySlotClick({ professionalId, date: dateStr, startTime })
                   }

@@ -44,6 +44,10 @@ const AppNotifications = () => {
 
   const mentions = useMemo(() => list.filter((n) => n.type === "mention"), [list]);
   const globals = useMemo(() => list.filter((n) => n.type === "global"), [list]);
+  const appointments = useMemo(
+    () => list.filter((n) => n.type.startsWith("appointment_")),
+    [list]
+  );
 
   const invalidateNotifs = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ["notifications", companyId] });
@@ -77,6 +81,10 @@ const AppNotifications = () => {
         }
         invalidateNotifs();
       }
+      if (n.appointment_id) {
+        navigate(`/app/agenda?edit=${n.appointment_id}`);
+        return;
+      }
       if (n.recado_id) {
         navigate(`/app/mural?recado=${n.recado_id}`);
       }
@@ -105,7 +113,7 @@ const AppNotifications = () => {
       <BellOff className="h-12 w-12 text-muted-foreground mb-4" aria-hidden />
       <h3 className="text-lg font-medium mb-1">Nenhuma notificação por aqui</h3>
       <p className="text-sm text-muted-foreground max-w-md">
-        Quando alguém usar @ com seu nome ou @todos no mural, aparecerá aqui.
+        Menções no mural, avisos gerais e alertas de agendamento (novo, alterado, cancelado) aparecem aqui.
       </p>
     </div>
   );
@@ -113,7 +121,7 @@ const AppNotifications = () => {
   const devMigrationHint =
     import.meta.env.DEV ? (
       <p>
-        Em desenvolvimento: confira se as migrations de notificações (051 e 055) foram aplicadas no
+        Em desenvolvimento: confira se as migrations de notificações (051, 055 e 062) foram aplicadas no
         Supabase.
       </p>
     ) : null;
@@ -163,6 +171,31 @@ const AppNotifications = () => {
                       onOpen={handleOpen}
                       onMarkRead={handleMarkRead}
                       isMarkingRead={markReadMutation.isPending && markReadMutation.variables === n.id}
+                    />
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {appointments.length > 0 && (
+            <section aria-labelledby="notif-appointments-heading">
+              <h2
+                id="notif-appointments-heading"
+                className="text-sm font-semibold text-muted-foreground mb-3"
+              >
+                Agenda
+              </h2>
+              <ul className="space-y-3">
+                {appointments.map((n) => (
+                  <li key={n.id}>
+                    <NotificationCard
+                      notification={n}
+                      onOpen={handleOpen}
+                      onMarkRead={handleMarkRead}
+                      isMarkingRead={
+                        markReadMutation.isPending && markReadMutation.variables === n.id
+                      }
                     />
                   </li>
                 ))}

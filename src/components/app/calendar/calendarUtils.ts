@@ -1,8 +1,9 @@
 import { format } from "date-fns";
 
 export const PIXELS_PER_MINUTE = 2;
+/** Espaço mínimo entre rótulos na coluna lateral (px) */
+export const MIN_TIME_LABEL_GAP_PX = 18;
 export const MIN_EVENT_HEIGHT = 24;
-export const CLICK_ROUNDING_MINUTES = 15;
 /** Espaço vertical para rótulos de hora não serem cortados no scroll */
 export const CALENDAR_TIMELINE_PAD_Y = 16;
 export const CALENDAR_HEADER_HEIGHT_PX = 48;
@@ -29,6 +30,18 @@ export function parseAppointmentEnd(appointment: CalendarAppointmentTime): Date 
 export function timeToMinutes(value: string): number {
   const [h, m] = String(value ?? "00:00").slice(0, 5).split(":").map(Number);
   return h * 60 + m;
+}
+
+/** Escala vertical da agenda conforme o intervalo (evita rótulos sobrepostos). */
+export function resolveTimelinePixelsPerMinute(slotIntervalMinutes: number): number {
+  const step = Math.max(1, slotIntervalMinutes);
+  return Math.max(PIXELS_PER_MINUTE, MIN_TIME_LABEL_GAP_PX / step);
+}
+
+export function formatMinutesLabel(totalMinutes: number): string {
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
 
 export function minutesToTime(totalMinutes: number): string {

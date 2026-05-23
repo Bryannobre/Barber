@@ -34,6 +34,7 @@ import {
 import { maskPhone } from "@/lib/masks";
 
 const DAYS = [
+  { value: 0, label: "Domingo" },
   { value: 1, label: "Segunda" },
   { value: 2, label: "Terça" },
   { value: 3, label: "Quarta" },

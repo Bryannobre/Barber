@@ -22,7 +22,11 @@ import {
 } from "@/components/booking";
 import { useToast } from "@/hooks/use-toast";
 import { maskPhone } from "@/lib/masks";
-import { calculateBookingDurationMinutes } from "@/lib/bookingDuration";
+import {
+  calculateBookingDurationMinutes,
+  resolveBookingSlotIntervalMinutes,
+} from "@/lib/bookingDuration";
+import { supabase } from "@/lib/supabase";
 
 const INITIAL_CLIENT_FORM: ClientFormData = {
   name: "",
@@ -70,6 +74,26 @@ const ClientBookingInner = () => {
   }, [step, user, profile]);
 
   const companyId = currentCompany?.id ?? "";
+
+  const { data: companyBookingSettings } = useQuery({
+    queryKey: ["company-booking-settings", companyId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("companies")
+        .select("booking_slot_interval_minutes, opening_time, closing_time")
+        .eq("id", companyId)
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!companyId,
+    staleTime: 0,
+  });
+
+  const slotIntervalMinutes = resolveBookingSlotIntervalMinutes(
+    companyBookingSettings?.booking_slot_interval_minutes ??
+      currentCompany?.booking_slot_interval_minutes
+  );
 
   const { data: servicesData } = useQuery({
     queryKey: ["services-booking", companyId],
@@ -121,6 +145,8 @@ const ClientBookingInner = () => {
       selectedPro,
       selectedDateStr,
       selectedServices,
+      totalDuration,
+      slotIntervalMinutes,
     ],
     queryFn: () =>
       selectedPro && selectedDateStr && selectedServices.length > 0
@@ -130,7 +156,8 @@ const ClientBookingInner = () => {
             selectedDateStr,
             selectedServices,
             serviceDurations,
-            totalDuration
+            totalDuration,
+            slotIntervalMinutes
           )
         : Promise.resolve({ data: [] }),
     enabled:
@@ -433,7 +460,10 @@ const ClientBookingInner = () => {
         {step === 3 && (
           <div className="space-y-4 animate-fade-in">
             <div>
-              <p className="mb-2 text-sm font-medium">Horário disponível</p>
+              <p className="mb-1 text-sm font-medium">Horário disponível</p>
+              <p className="mb-2 text-xs text-muted-foreground">
+                Intervalos de {slotIntervalMinutes} min (configuração da empresa)
+              </p>
               <BookingTimeSlots
                 slots={slots}
                 selected={selectedTime}
