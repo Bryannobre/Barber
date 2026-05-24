@@ -150,7 +150,7 @@ export async function processInvoiceEmission(
   await updateInvoiceRow(admin, invoiceId, {
     status: "PROCESSING",
     error_message: null,
-    retry_count: options.mode === "retry" ? nextRetryCount : currentRetryCount,
+    retry_count: options.mode === "retry" ? nextRetryCount : currentRetry,
   });
 
   await insertInvoiceLog(admin, {
