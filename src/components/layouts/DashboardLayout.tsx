@@ -33,6 +33,7 @@ import {
   MessageSquare,
   ChevronDown,
   Search,
+  FileText,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { toast } from "sonner";
@@ -80,6 +81,7 @@ const NAV_GROUPS: NavItemDef[][] = [
   ],
   [
     { label: "Financeiro", icon: DollarSign, path: "/app/financial", accessKey: "financial" },
+    { label: "Fiscal", icon: FileText, path: "/app/fiscal", accessKey: "fiscal" },
     { label: "Pagamentos", icon: Percent, path: "/app/payments", accessKey: "payments" },
     { label: "Relatórios", icon: BarChart3, path: "/app/reports", accessKey: "reports" },
   ],
@@ -172,6 +174,9 @@ const DashboardLayout = () => {
         queryClient.refetchQueries({ queryKey: ["performance-indicators"] }),
         queryClient.refetchQueries({ queryKey: ["dashboard-services"] }),
         queryClient.refetchQueries({ queryKey: ["financial"] }),
+        queryClient.refetchQueries({ queryKey: ["fiscal-invoices"] }),
+        queryClient.refetchQueries({ queryKey: ["fiscal-logs"] }),
+        queryClient.refetchQueries({ queryKey: ["fiscal-invoice-map"] }),
         queryClient.refetchQueries({ queryKey: ["clients"] }),
         queryClient.refetchQueries({ queryKey: ["services"] }),
         queryClient.refetchQueries({ queryKey: ["professionals"] }),

@@ -10,11 +10,27 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import CardWidget from "@/components/shared/CardWidget";
-import { DollarSign, TrendingUp, TrendingDown, Wallet, Plus, Minus } from "lucide-react";
+import {
+  DollarSign,
+  TrendingUp,
+  TrendingDown,
+  Wallet,
+  Plus,
+  Minus,
+  FileText,
+  Loader2,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Link } from "react-router-dom";
 import { useTenant } from "@/contexts/TenantContext";
 import { useAuth } from "@/hooks/useAuth";
+import { useCompanyPageAccess } from "@/hooks/useCompanyPageAccess";
 import { financialService } from "@/services/financial.service";
+import {
+  fiscalService,
+  isFinancialRecordEligibleForInvoice,
+} from "@/services/fiscal.service";
+import { supabase } from "@/lib/supabase";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import {
@@ -191,7 +207,11 @@ function ManualEntryModal({
 const AppFinancial = () => {
   const { currentCompany } = useTenant();
   const { user } = useAuth();
+  const { hasAccessToPage } = useCompanyPageAccess();
+  const canUseFiscal = hasAccessToPage("fiscal");
+  const queryClient = useQueryClient();
   const companyId = currentCompany?.id ?? "";
+  const [emittingRecordId, setEmittingRecordId] = useState<string | null>(null);
   const [periodKey, setPeriodKey] = useState<PeriodKey>("today");
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
@@ -237,6 +257,52 @@ const AppFinancial = () => {
   });
 
   const records = recordsData?.data ?? [];
+
+  const incomeRecordIds = records
+    .filter((r) => isFinancialRecordEligibleForInvoice(r))
+    .map((r) => r.id);
+
+  const { data: invoiceByFinancialId = new Map() } = useQuery({
+    queryKey: ["fiscal-invoice-map", companyId, incomeRecordIds.join(",")],
+    queryFn: () => fiscalService.getInvoicesByFinancialRecordIds(companyId, incomeRecordIds),
+    enabled: !!companyId && canUseFiscal && incomeRecordIds.length > 0,
+  });
+
+  const emitInvoiceMutation = useMutation({
+    mutationFn: async (record: FinancialRecord) => {
+      let appointment: { professional_id?: string | null; company_client_id?: string | null } | null =
+        null;
+      if (record.appointment_id) {
+        const { data: appt } = await supabase
+          .from("appointments")
+          .select("professional_id, company_client_id")
+          .eq("id", record.appointment_id)
+          .eq("company_id", companyId)
+          .maybeSingle();
+        appointment = appt;
+      }
+
+      const invoice = await fiscalService.createInvoiceFromFinancialRecord(
+        {
+          company_id: companyId,
+          financial_record_id: record.id,
+          created_by: user?.id,
+        },
+        record,
+        appointment
+      );
+
+      return fiscalService.issueInvoice(companyId, invoice.id);
+    },
+    onSuccess: () => {
+      toast.success("Nota fiscal emitida (mock).");
+      queryClient.invalidateQueries({ queryKey: ["fiscal-invoices"] });
+      queryClient.invalidateQueries({ queryKey: ["fiscal-invoice-map"] });
+      queryClient.invalidateQueries({ queryKey: ["fiscal-logs"] });
+    },
+    onError: (err: Error) => toast.error(err.message),
+    onSettled: () => setEmittingRecordId(null),
+  });
 
   const filteredRecords =
     sourceFilter === "all"
@@ -419,12 +485,16 @@ const AppFinancial = () => {
               <TableHead className="hidden sm:table-cell">Origem</TableHead>
               <TableHead className="hidden md:table-cell">Pagamento</TableHead>
               <TableHead className="text-right">Valor</TableHead>
+              {canUseFiscal && <TableHead className="text-right">Fiscal</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
             {filteredRecords.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground py-12">
+                <TableCell
+                  colSpan={canUseFiscal ? 8 : 7}
+                  className="text-center text-muted-foreground py-12"
+                >
                   {records.length === 0
                     ? "Nenhuma movimentação no período. Receitas de cortes entram aqui quando o agendamento está \"Concluído\" e o horário do atendimento já passou. Use os botões acima para entradas ou saídas manuais."
                     : "Nenhum registro com essa origem no período."}
@@ -471,6 +541,57 @@ const AppFinancial = () => {
                     {r.type === "income" ? "+" : "-"}
                     {formatCurrency(Math.abs(Number(r.amount)))}
                   </TableCell>
+                  {canUseFiscal && (
+                    <TableCell className="text-right align-top">
+                      {isFinancialRecordEligibleForInvoice(r) ? (
+                        (() => {
+                          const existing = invoiceByFinancialId.get(r.id);
+                          if (existing?.status === "ISSUED") {
+                            return (
+                              <Button variant="ghost" size="sm" asChild>
+                                <Link to="/app/fiscal">
+                                  <FileText className="h-4 w-4 mr-1" />
+                                  {existing.invoice_number ?? "Nota"}
+                                </Link>
+                              </Button>
+                            );
+                          }
+                          if (
+                            existing &&
+                            (existing.status === "PENDING" || existing.status === "FAILED")
+                          ) {
+                            return (
+                              <Button variant="ghost" size="sm" asChild>
+                                <Link to="/app/fiscal">Continuar</Link>
+                              </Button>
+                            );
+                          }
+                          return (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={emittingRecordId === r.id}
+                              onClick={() => {
+                                setEmittingRecordId(r.id);
+                                emitInvoiceMutation.mutate(r);
+                              }}
+                            >
+                              {emittingRecordId === r.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <>
+                                  <FileText className="h-4 w-4 mr-1" />
+                                  Emitir Nota
+                                </>
+                              )}
+                            </Button>
+                          );
+                        })()
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
+                  )}
                 </TableRow>
               ))
             )}

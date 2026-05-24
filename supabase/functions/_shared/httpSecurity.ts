@@ -45,11 +45,42 @@ export function rateLimitExceeded(ip: string): boolean {
   return false;
 }
 
+/** Vite dev (3080/5173) acessado por IP da LAN, Radmin VPN, celular na mesma rede, etc. */
+function isLanDevOrigin(origin: string): boolean {
+  try {
+    const url = new URL(origin);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+    const port = url.port || (url.protocol === "https:" ? "443" : "80");
+    if (port !== "3080" && port !== "5173") return false;
+    if (url.hostname === "localhost" || url.hostname === "127.0.0.1") return true;
+    // IPv4 na rede local / VPN — só quando ALLOWED_ORIGINS não está fixo em produção
+    return /^(\d{1,3}\.){3}\d{1,3}$/.test(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
 export function isOriginAllowed(origin: string | null): boolean {
   if (!origin || origin === "null") return false;
   const allowed = parseAllowedOrigins();
   const normalized = origin.replace(/\/$/, "");
-  return allowed.some((a) => a === normalized);
+  if (allowed.some((a) => a === normalized)) return true;
+  // Sem secret ALLOWED_ORIGINS no Supabase: permitir dev por IP (ex.: http://26.x.x.x:3080)
+  if (!Deno.env.get("ALLOWED_ORIGINS")?.trim() && isLanDevOrigin(normalized)) {
+    return true;
+  }
+  // Vercel (preview e producao) quando ALLOWED_ORIGINS nao foi configurado
+  if (!Deno.env.get("ALLOWED_ORIGINS")?.trim()) {
+    try {
+      const host = new URL(normalized).hostname;
+      if (host.endsWith(".vercel.app") && normalized.startsWith("https://")) {
+        return true;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  return false;
 }
 
 export function corsHeadersForRequest(req: Request): Record<string, string> {

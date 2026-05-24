@@ -33,9 +33,13 @@ const AppFinancial = lazy(() => import("./pages/app/AppFinancial"));
 const AppStock = lazy(() => import("./pages/app/AppStock"));
 const AppPayments = lazy(() => import("./pages/app/AppPayments"));
 const AppReports = lazy(() => import("./pages/app/AppReports"));
+const AppFiscal = lazy(() => import("./pages/app/AppFiscal"));
+const AppFiscalSettings = lazy(() => import("./pages/app/AppFiscalSettings"));
+const AppFiscalLogs = lazy(() => import("./pages/app/AppFiscalLogs"));
 const AppMural = lazy(() => import("./pages/app/AppMural"));
 const AppNotifications = lazy(() => import("./pages/app/AppNotifications"));
 import { ReportsGuard } from "./components/auth/ReportsGuard";
+import { FiscalGuard } from "./components/auth/FiscalGuard";
 const AppSettings = lazy(() => import("./pages/app/AppSettings"));
 const LandingSettings = lazy(() => import("./pages/app/LandingSettings"));
 const SiteLanding = lazy(() => import("./pages/site/SiteLanding"));
@@ -115,6 +119,30 @@ const App = () => (
                     <ReportsGuard>
                       <AppReports />
                     </ReportsGuard>
+                  }
+                />
+                <Route
+                  path="fiscal"
+                  element={
+                    <FiscalGuard>
+                      <AppFiscal />
+                    </FiscalGuard>
+                  }
+                />
+                <Route
+                  path="fiscal/settings"
+                  element={
+                    <FiscalGuard>
+                      <AppFiscalSettings />
+                    </FiscalGuard>
+                  }
+                />
+                <Route
+                  path="fiscal/logs"
+                  element={
+                    <FiscalGuard>
+                      <AppFiscalLogs />
+                    </FiscalGuard>
                   }
                 />
                 <Route path="mural" element={<AppMural />} />
