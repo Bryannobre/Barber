@@ -220,23 +220,20 @@ const AppFinancial = () => {
     });
   };
 
-  const { data: stats, isError: statsError } = useQuery({
-    queryKey: ["financial", "stats", companyId, startDate, endDate],
-    queryFn: async () => {
-      if (companyId) {
-        await financialService.syncAppointmentRevenue(companyId, user?.id);
-      }
-      return financialService.getStats(companyId, { startDate, endDate });
-    },
-    enabled: !!companyId,
-    retry: false,
-  });
-
   const { data: recordsData, isError: recordsError } = useQuery({
     queryKey: ["financial", "records", companyId, startDate, endDate],
     queryFn: syncAndLoad,
     enabled: !!companyId,
     retry: false,
+    refetchOnWindowFocus: false,
+  });
+
+  const { data: stats, isError: statsError } = useQuery({
+    queryKey: ["financial", "stats", companyId, startDate, endDate],
+    queryFn: () => financialService.getStats(companyId, { startDate, endDate }),
+    enabled: !!companyId && recordsData !== undefined,
+    retry: false,
+    refetchOnWindowFocus: false,
   });
 
   const records = recordsData?.data ?? [];

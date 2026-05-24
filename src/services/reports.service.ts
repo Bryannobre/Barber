@@ -153,10 +153,10 @@ export const reportsService = {
       else {
         return {
           data: {
-            faturamentoTotal,
-            faturamentoServicos,
-            faturamentoProdutos,
-            lucroEstimado,
+            faturamentoTotal: 0,
+            faturamentoServicos: 0,
+            faturamentoProdutos: 0,
+            lucroEstimado: 0,
             totalAgendamentos: 0,
             agendamentosConcluidos: 0,
             ticketMedio: 0,

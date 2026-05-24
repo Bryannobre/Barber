@@ -59,6 +59,63 @@ export interface CreateFromProductSaleParams {
   created_by?: string | null;
 }
 
+type ExistingFinancialRow = {
+  id: string;
+  amount: number;
+  payment_method?: string | null;
+};
+
+/** Vários lançamentos válidos quebram `.maybeSingle()` e faziam o sync criar duplicatas em loop. */
+async function getPrimaryValidFinancialForAppointment(
+  appointmentId: string
+): Promise<ExistingFinancialRow | null> {
+  const { data, error } = await supabase
+    .from("financial_records")
+    .select("id, amount, payment_method")
+    .eq("appointment_id", appointmentId)
+    .eq("is_valid", true)
+    .eq("source", "appointment")
+    .order("created_at", { ascending: true });
+
+  if (error || !data?.length) return null;
+
+  const rows = data as ExistingFinancialRow[];
+  if (rows.length > 1) {
+    const dupIds = rows.slice(1).map((r) => r.id);
+    await supabase.from("financial_records").update({ is_valid: false }).in("id", dupIds);
+  }
+  return rows[0];
+}
+
+async function dedupeCompanyAppointmentFinancials(companyId: string) {
+  const { data, error } = await supabase
+    .from("financial_records")
+    .select("id, appointment_id, created_at")
+    .eq("company_id", companyId)
+    .eq("source", "appointment")
+    .eq("is_valid", true)
+    .not("appointment_id", "is", null)
+    .order("created_at", { ascending: true });
+
+  if (error || !data?.length) return;
+
+  const byAppointment = new Map<string, string[]>();
+  for (const row of data as { id: string; appointment_id: string }[]) {
+    const list = byAppointment.get(row.appointment_id) ?? [];
+    list.push(row.id);
+    byAppointment.set(row.appointment_id, list);
+  }
+
+  const duplicateIds: string[] = [];
+  for (const ids of byAppointment.values()) {
+    if (ids.length > 1) duplicateIds.push(...ids.slice(1));
+  }
+
+  if (duplicateIds.length > 0) {
+    await supabase.from("financial_records").update({ is_valid: false }).in("id", duplicateIds);
+  }
+}
+
 export const financialService = {
   async createFromAppointment(params: CreateFromAppointmentParams) {
     requireCompanyId(params.company_id);
@@ -143,12 +200,7 @@ export const financialService = {
     const paymentMethod =
       appointment.payment_method ?? DEFAULT_PAYMENT_METHOD;
 
-    const { data: existing } = await supabase
-      .from("financial_records")
-      .select("id, amount, payment_method")
-      .eq("appointment_id", appointmentId)
-      .eq("is_valid", true)
-      .maybeSingle();
+    const existing = await getPrimaryValidFinancialForAppointment(appointmentId);
 
     if (existing?.id) {
       const currentAmount = Math.abs(Number(existing.amount));
@@ -263,6 +315,8 @@ export const financialService = {
    */
   async syncAppointmentRevenue(companyId: string, createdBy?: string | null) {
     requireCompanyId(companyId);
+    await dedupeCompanyAppointmentFinancials(companyId);
+
     const { data: validAppointmentRecords, error: listErr } = await supabase
       .from("financial_records")
       .select("id, appointment_id")

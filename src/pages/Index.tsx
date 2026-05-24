@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Link, Navigate } from "react-router-dom";
-import { Scissors, Shield, Building2, ChevronRight } from "lucide-react";
+import { Shield, Building2, ChevronRight } from "lucide-react";
+import PlatformBrandMark from "@/components/shared/PlatformBrandMark";
 import { useAuth } from "@/hooks/useAuth";
 import { resetAppTheme } from "@/lib/companyTheme";
 
@@ -67,16 +68,8 @@ const Index = () => {
       <div className="flex-1 flex items-center justify-center p-6 min-h-screen">
         <div className="w-full max-w-lg animate-fade-in">
           {/* Header */}
-          <div className="text-center mb-12">
-            <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-primary/10 mb-6 ring-4 ring-primary/5">
-              <Scissors className="text-primary" size={40} strokeWidth={1.5} />
-            </div>
-            <h1 className="text-4xl md:text-5xl font-bold tracking-tight mb-3">
-              brynex
-            </h1>
-            <p className="text-muted-foreground text-lg max-w-sm mx-auto">
-              Plataforma SaaS para gestão de negócios de beleza
-            </p>
+          <div className="mb-12 px-2">
+            <PlatformBrandMark size="lg" showName={false} logoClassName="md:max-w-2xl" />
           </div>
 
           {/* Opções */}

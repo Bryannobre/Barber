@@ -44,7 +44,7 @@ const ClientLayout = () => {
   }, [currentCompany, landingRes?.data?.primary_color]);
 
   const companyId = currentCompany?.id ?? null;
-  const companyName = currentCompany?.name ?? "brynex";
+  const companyName = currentCompany?.name ?? "Auren";
   const bookingPath = currentCompany?.slug
     ? `/client/booking?company=${currentCompany.slug}`
     : "/client/booking";

@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { PLATFORM_BRAND } from "@/lib/platformBrand";
 import type { Company } from "@/types/database.types";
 
 interface UseSiteMetaOptions {
@@ -14,7 +15,7 @@ export function useSiteMeta({ company, slug, isReady }: UseSiteMetaOptions) {
   useEffect(() => {
     if (!isReady || !company || !slug) return;
 
-    const title = `${company.name} | Brynex`;
+    const title = `${company.name} | ${PLATFORM_BRAND.name}`;
     const description =
       company.slogan ??
       `${company.name} - Agende online e transforme seu visual.`;
@@ -61,7 +62,7 @@ export function useSiteMeta({ company, slug, isReady }: UseSiteMetaOptions) {
     if (imageUrl) setOrCreateMeta("og:image", imageUrl);
 
     return () => {
-      document.title = "Brynex";
+      document.title = PLATFORM_BRAND.name;
     };
   }, [company, slug, isReady]);
 }

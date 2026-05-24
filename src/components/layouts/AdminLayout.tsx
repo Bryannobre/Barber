@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
-import { Building2, LogOut, Shield, Menu } from "lucide-react";
+import { Building2, LogOut, Menu } from "lucide-react";
+import PlatformBrandMark from "@/components/shared/PlatformBrandMark";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
@@ -34,12 +35,9 @@ const AdminLayout = () => {
   return (
     <div className="flex h-screen bg-background">
       <aside className="hidden md:flex w-64 border-r border-border bg-sidebar flex-col">
-        <div className="p-6 border-b border-border">
-          <div className="flex items-center gap-2">
-            <Shield className="text-primary" size={24} />
-            <span className="font-display text-xl font-bold text-primary">brynex</span>
-          </div>
-          <p className="text-xs text-muted-foreground mt-1">Painel Administrativo</p>
+        <div className="p-4 border-b border-border">
+          <PlatformBrandMark size="sm" showTagline={false} />
+          <p className="text-xs text-muted-foreground mt-2 text-center">Painel Administrativo</p>
         </div>
         <nav className="flex-1 p-4">
           <Link

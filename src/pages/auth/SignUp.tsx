@@ -5,7 +5,8 @@ import { SignUpForm, type SignUpFormValues } from "@/components/auth/SignUpForm"
 import { sanitizeInternalReturnTo } from "@/lib/safeRedirect";
 import { createClientAccount } from "@/services/clientAccount.service";
 import { supabase } from "@/lib/supabase";
-import { ArrowLeft, Scissors } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
+import PlatformBrandMark from "@/components/shared/PlatformBrandMark";
 
 export default function SignUp() {
   const navigate = useNavigate();
@@ -79,9 +80,7 @@ export default function SignUp() {
       </Link>
       <div className="w-full max-w-md space-y-8 animate-fade-in">
         <div className="text-center">
-          <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-4">
-            <Scissors className="text-primary" size={32} />
-          </div>
+          <PlatformBrandMark size="sm" showTagline={false} className="mb-4" />
           <h1 className="text-2xl font-bold">Criar conta</h1>
           <p className="text-muted-foreground text-sm mt-1">
             Cadastre-se para fazer agendamentos
