@@ -1,5 +1,19 @@
+import type { PostgrestError } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
+import { getSafeClientMessage } from "@/lib/supabaseErrors";
 import type { CompanyMemberWithProfile } from "@/types/database.types";
+
+/** Mensagem da RPC (RAISE EXCEPTION) — PostgREST devolve 400 com texto em message/details. */
+export function getCompanyMemberRpcErrorMessage(error: unknown): string {
+  if (error && typeof error === "object" && "message" in error) {
+    const pg = error as PostgrestError;
+    const raw = (pg.details ?? pg.message ?? "").trim();
+    if (raw && raw.length < 200 && !raw.toLowerCase().includes("bad request")) {
+      return raw;
+    }
+  }
+  return getSafeClientMessage(error);
+}
 
 export interface AddCompanyMemberParams {
   company_id: string;

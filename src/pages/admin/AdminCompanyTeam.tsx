@@ -27,7 +27,10 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { companyService } from "@/services/company.service";
-import { companyMemberService } from "@/services/company-member.service";
+import {
+  companyMemberService,
+  getCompanyMemberRpcErrorMessage,
+} from "@/services/company-member.service";
 import type { CompanyMemberWithProfile } from "@/types/database.types";
 import { APP_PAGE_KEYS, APP_PAGE_LABELS } from "@/hooks/useCompanyPageAccess";
 
@@ -74,15 +77,18 @@ const AdminCompanyTeam = () => {
   });
 
   const addMemberMutation = useMutation({
-    mutationFn: () =>
-      companyMemberService.addToCompany({
+    mutationFn: async () => {
+      const { data, error } = await companyMemberService.addToCompany({
         company_id: companyId,
         full_name: form.full_name.trim(),
         email: form.email.trim(),
         phone: form.phone.trim(),
         password: form.password,
         allowed_pages: form.allowed_pages,
-      }),
+      });
+      if (error) throw new Error(getCompanyMemberRpcErrorMessage(error));
+      return data;
+    },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["company-members", companyId] });
       setOpenAdd(false);
@@ -96,9 +102,7 @@ const AdminCompanyTeam = () => {
       toast.success("Usuário vinculado com sucesso.");
     },
     onError: (error) => {
-      const fallback = "Não foi possível vincular o usuário.";
-      const message = error instanceof Error ? error.message : fallback;
-      toast.error(message);
+      toast.error(getCompanyMemberRpcErrorMessage(error));
     },
   });
 
@@ -115,15 +119,18 @@ const AdminCompanyTeam = () => {
   });
 
   const updateMemberMutation = useMutation({
-    mutationFn: () =>
-      companyMemberService.updateProfileAndAccess({
+    mutationFn: async () => {
+      const { data, error } = await companyMemberService.updateProfileAndAccess({
         company_id: companyId,
         user_id: editingMember!.user_id,
         full_name: form.full_name.trim(),
         phone: form.phone.trim(),
         allowed_pages: form.allowed_pages,
         password: form.password.trim() || undefined,
-      }),
+      });
+      if (error) throw new Error(getCompanyMemberRpcErrorMessage(error));
+      return data;
+    },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["company-members", companyId] });
       setEditingMember(null);
@@ -137,9 +144,7 @@ const AdminCompanyTeam = () => {
       toast.success("Perfil e acessos atualizados.");
     },
     onError: (error) => {
-      const fallback = "Não foi possível atualizar o perfil do usuário.";
-      const message = error instanceof Error ? error.message : fallback;
-      toast.error(message);
+      toast.error(getCompanyMemberRpcErrorMessage(error));
     },
   });
 
