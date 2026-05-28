@@ -1,4 +1,5 @@
 import type { Professional } from "@/types/database.types";
+import { WhatsAppPhoneLink } from "@/components/ui/WhatsAppPhoneLink";
 
 export interface ProfessionalWithServices extends Professional {
   serviceNames: string[];
@@ -85,6 +86,13 @@ export function SiteProfessionals({ professionals }: SiteProfessionalsProps) {
                     <p className="text-sm text-muted-foreground">
                       {pro.serviceNames.join(" · ")}
                     </p>
+                  )}
+                  {pro.phone && (
+                    <WhatsAppPhoneLink
+                      phone={pro.phone}
+                      className="text-sm mt-1"
+                      onClick={(e) => e.stopPropagation()}
+                    />
                   )}
                 </div>
               </article>

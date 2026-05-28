@@ -4,6 +4,10 @@ import { addMinutes, parse, format, setHours, setMinutes } from "date-fns";
 import type { Appointment, Service } from "@/types/database.types";
 import { financialService } from "@/services/financial.service";
 import { resolveBookingSlotIntervalMinutes } from "@/lib/bookingDuration";
+import {
+  resolveCompanyDayWindow,
+  type CompanyBusinessHour,
+} from "@/lib/businessHours";
 
 export interface CreateAppointmentParams {
   company_id: string;
@@ -209,24 +213,38 @@ export const bookingService = {
       serviceIds.reduce((acc, sid) => acc + (serviceDurations[sid] ?? 0), 0);
     if (totalDuration <= 0) return { data: [], error: null };
 
-    const { data: companyData, error: companyError } = await supabase
-      .from("companies")
-      .select("opening_time, closing_time, booking_slot_interval_minutes")
-      .eq("id", companyId)
-      .single();
+    const [{ data: companyData, error: companyError }, { data: businessHours, error: bhError }] =
+      await Promise.all([
+        supabase
+          .from("companies")
+          .select("opening_time, closing_time, booking_slot_interval_minutes")
+          .eq("id", companyId)
+          .single(),
+        supabase
+          .from("company_business_hours")
+          .select("day_of_week, is_closed, opens_at, closes_at")
+          .eq("company_id", companyId),
+      ]);
 
     if (companyError) return { data: [], error: companyError };
-
-    const companyOpen = timeToMinutes(
-      normalizeTime(companyData?.opening_time, DEFAULT_OPENING_TIME)
-    );
-    const companyClose = timeToMinutes(
-      normalizeTime(companyData?.closing_time, DEFAULT_CLOSING_TIME)
-    );
-
-    if (companyClose <= companyOpen) return { data: [], error: null };
+    if (bhError) return { data: [], error: bhError };
 
     const dayOfWeek = parseLocalDate(date).getDay();
+    const dayWindow = resolveCompanyDayWindow(
+      dayOfWeek,
+      (businessHours ?? []) as CompanyBusinessHour[],
+      {
+        opening_time: companyData?.opening_time,
+        closing_time: companyData?.closing_time,
+      }
+    );
+
+    if (dayWindow.closed) return { data: [], error: null };
+
+    const companyOpen = dayWindow.openMinutes;
+    const companyClose = dayWindow.closeMinutes;
+
+    if (companyClose <= companyOpen) return { data: [], error: null };
     const { data: wh, error: whError } = await supabase
       .from("working_hours")
       .select("*")

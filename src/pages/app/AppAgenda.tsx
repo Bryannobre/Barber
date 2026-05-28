@@ -32,6 +32,7 @@ import type { Appointment, ProfessionalWithServices } from "@/types/database.typ
 import { AppointmentFormModal, type FormValues } from "@/components/app/AppointmentFormModal";
 import { CalendarView } from "@/components/app/calendar/CalendarView";
 import { useCompanyBookingSlotInterval } from "@/hooks/useCompanyBookingSlotInterval";
+import { resolveCompanyDayWindow } from "@/lib/businessHours";
 
 const DEFAULT_OPENING_TIME = "09:00";
 const DEFAULT_CLOSING_TIME = "19:00";
@@ -56,21 +57,12 @@ const AppAgenda = () => {
   const { currentCompany } = useTenant();
   const { user } = useAuth();
   const companyId = currentCompany?.id ?? "";
-  const { slotIntervalMinutes, openingTime: dbOpening, closingTime: dbClosing } =
-    useCompanyBookingSlotInterval(
-      companyId,
-      currentCompany?.booking_slot_interval_minutes
-    );
-  const openingTime = (
-    dbOpening ?? currentCompany?.opening_time ?? DEFAULT_OPENING_TIME
-  )
-    .toString()
-    .slice(0, 5);
-  const closingTime = (
-    dbClosing ?? currentCompany?.closing_time ?? DEFAULT_CLOSING_TIME
-  )
-    .toString()
-    .slice(0, 5);
+  const {
+    slotIntervalMinutes,
+    openingTime: dbOpening,
+    closingTime: dbClosing,
+    businessHours,
+  } = useCompanyBookingSlotInterval(companyId, currentCompany?.booking_slot_interval_minutes);
   const [weekStart, setWeekStart] = useState(() =>
     startOfWeek(new Date(), { weekStartsOn: 1 })
   );
@@ -321,6 +313,28 @@ const AppAgenda = () => {
   const selectedDay = weekDays[Math.min(Math.max(selectedDayOffset, 0), WEEK_DAYS - 1)];
   const selectedDate = selectedDay.dateObj;
 
+  const legacyHours = useMemo(
+    () => ({
+      opening_time: dbOpening ?? currentCompany?.opening_time,
+      closing_time: dbClosing ?? currentCompany?.closing_time,
+    }),
+    [dbOpening, dbClosing, currentCompany?.opening_time, currentCompany?.closing_time]
+  );
+
+  const isCompanyClosedOn = useCallback(
+    (date: Date) => resolveCompanyDayWindow(date.getDay(), businessHours, legacyHours).closed,
+    [businessHours, legacyHours]
+  );
+
+  const selectedDayWindow = useMemo(
+    () => resolveCompanyDayWindow(selectedDate.getDay(), businessHours, legacyHours),
+    [selectedDate, businessHours, legacyHours]
+  );
+
+  const openingTime = selectedDayWindow.closed ? DEFAULT_OPENING_TIME : selectedDayWindow.opensAt;
+  const closingTime = selectedDayWindow.closed ? DEFAULT_CLOSING_TIME : selectedDayWindow.closesAt;
+  const isSelectedDayCompanyClosed = selectedDayWindow.closed;
+
   const todayStr = format(new Date(), "yyyy-MM-dd");
 
   useEffect(() => {
@@ -438,6 +452,11 @@ const AppAgenda = () => {
     date: string;
     startTime: string;
   }) => {
+    const slotDate = parseISO(payload.date);
+    if (isCompanyClosedOn(slotDate)) {
+      toast.error("A empresa está fechada neste dia. Ajuste em Configurações → Horário de funcionamento.");
+      return;
+    }
     const slotDt = new Date(`${payload.date}T${payload.startTime}:00`);
     if (slotDt < new Date()) {
       toast.error("Não é possível agendar em horário passado.");
@@ -565,6 +584,7 @@ const AppAgenda = () => {
             const isSelected = d.offset === selectedDayOffset;
             const isToday = d.dateStr === todayStr;
             const count = appointmentCountByDay[d.dateStr] ?? 0;
+            const dayClosed = isCompanyClosedOn(d.dateObj);
             return (
               <Button
                 key={d.dateStr}
@@ -574,6 +594,7 @@ const AppAgenda = () => {
                 className={`
                   flex h-auto min-h-[4.5rem] flex-col items-center justify-center gap-0.5 rounded-lg px-1 py-2 sm:min-h-[5.25rem] sm:px-2
                   ${isToday && !isSelected ? "ring-2 ring-primary/40 ring-offset-2 ring-offset-background" : ""}
+                  ${dayClosed && !isSelected ? "opacity-60 border-dashed" : ""}
                 `}
                 onClick={() => setSelectedDayOffset(d.offset)}
               >
@@ -602,12 +623,14 @@ const AppAgenda = () => {
                   className={`mt-0.5 rounded-full px-1.5 py-0.5 text-[9px] font-medium tabular-nums sm:text-[10px] ${
                     isSelected
                       ? "bg-primary-foreground/20 text-primary-foreground"
-                      : count > 0
-                        ? "bg-primary/10 text-primary"
-                        : "bg-muted text-muted-foreground"
+                      : dayClosed
+                        ? "bg-muted text-muted-foreground"
+                        : count > 0
+                          ? "bg-primary/10 text-primary"
+                          : "bg-muted text-muted-foreground"
                   }`}
                 >
-                  {count === 0 ? "—" : count}
+                  {dayClosed ? "Fechado" : count === 0 ? "—" : count}
                 </span>
               </Button>
             );
@@ -628,6 +651,7 @@ const AppAgenda = () => {
           openingTime={openingTime}
           closingTime={closingTime}
           slotIntervalMinutes={slotIntervalMinutes}
+          companyClosed={isSelectedDayCompanyClosed}
           onEmptySlotClick={handleEmptySlotClick}
           onEventClick={(appointmentId) => setEditingId(appointmentId)}
         />

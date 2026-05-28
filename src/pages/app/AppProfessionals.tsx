@@ -32,6 +32,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { maskPhone } from "@/lib/masks";
+import { WhatsAppPhoneLink } from "@/components/ui/WhatsAppPhoneLink";
 
 const DAYS = [
   { value: 0, label: "Domingo" },
@@ -215,9 +216,9 @@ const AppProfessionals = () => {
                   <h3 className="font-semibold text-base truncate">{p.name}</h3>
                   <p className="text-sm text-muted-foreground truncate">{p.specialty || "—"}</p>
                   {p.phone && (
-                    <div className="flex items-center gap-1.5 mt-2 text-sm text-muted-foreground">
-                      <Phone size={14} className="shrink-0" />
-                      <span className="truncate">{p.phone}</span>
+                    <div className="flex items-center gap-1.5 mt-2 text-sm">
+                      <Phone size={14} className="shrink-0 text-muted-foreground" />
+                      <WhatsAppPhoneLink phone={p.phone} className="truncate" />
                     </div>
                   )}
                   {p.email && (

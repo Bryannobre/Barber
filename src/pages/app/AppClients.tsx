@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import PageContainer from "@/components/shared/PageContainer";
+import { WhatsAppPhoneLink } from "@/components/ui/WhatsAppPhoneLink";
 import { useTenant } from "@/contexts/TenantContext";
 import { clientService } from "@/services/client.service";
 import {
@@ -181,7 +182,9 @@ const AppClients = () => {
                     onClick={() => setHistoryClientId(c.id)}
                   >
                     <TableCell className="font-medium">{c.full_name}</TableCell>
-                    <TableCell className="text-muted-foreground">{c.phone ?? "—"}</TableCell>
+                    <TableCell className="text-muted-foreground" onClick={(e) => e.stopPropagation()}>
+                      <WhatsAppPhoneLink phone={c.phone} />
+                    </TableCell>
                     <TableCell className="text-muted-foreground">{c.email ?? "—"}</TableCell>
                     <TableCell>{c.visit_count}</TableCell>
                     <TableCell className="text-muted-foreground">
@@ -251,7 +254,9 @@ const AppClients = () => {
                         <p className="text-sm text-muted-foreground truncate">{c.email}</p>
                       )}
                       {c.phone && (
-                        <p className="text-sm text-muted-foreground">{c.phone}</p>
+                        <p className="text-sm" onClick={(e) => e.stopPropagation()}>
+                          <WhatsAppPhoneLink phone={c.phone} />
+                        </p>
                       )}
                       <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-xs text-muted-foreground">
                         <span>Visitas: {c.visit_count}</span>

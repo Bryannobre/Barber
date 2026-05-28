@@ -116,12 +116,21 @@ const SiteLanding = () => {
           title={landingSettings?.hero_title}
           subtitle={landingSettings?.hero_subtitle}
           image={bust(landingSettings?.hero_image_url)}
+          textAlign={landingSettings?.hero_text_align}
+          titleSize={landingSettings?.hero_title_size}
+          titleWeight={landingSettings?.hero_title_weight}
+          titleLetterSpacing={landingSettings?.hero_title_letter_spacing}
+          titleTransform={landingSettings?.hero_title_transform}
+          subtitleSize={landingSettings?.hero_subtitle_size}
         />
         <SiteAbout
           company={company}
           text={landingSettings?.about_text}
           title={landingSettings?.about_title}
           titleAccent={landingSettings?.about_title_accent}
+          textAlign={landingSettings?.about_text_align}
+          titleSize={landingSettings?.about_title_size}
+          bodySize={landingSettings?.about_body_size}
           images={[
             bust(landingSettings?.about_image_1_url ?? landingSettings?.about_image_url ?? null),
             bust(landingSettings?.about_image_2_url),
@@ -153,6 +162,10 @@ const SiteLanding = () => {
           companyName={company.name}
           ctaText={landingSettings?.cta_text}
           buttonText={landingSettings?.cta_button_text}
+          textAlign={landingSettings?.cta_text_align}
+          titleSize={landingSettings?.cta_title_size}
+          bodySize={landingSettings?.cta_body_size}
+          buttonTextSize={landingSettings?.cta_button_text_size}
         />
         <SiteFooter company={company} />
       </div>

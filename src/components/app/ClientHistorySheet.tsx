@@ -9,6 +9,7 @@ import { clientService } from "@/services/client.service";
 import { format, parseISO, formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Skeleton } from "@/components/ui/skeleton";
+import { WhatsAppPhoneLink } from "@/components/ui/WhatsAppPhoneLink";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   User,
@@ -104,8 +105,8 @@ export function ClientHistorySheet({
                   </h3>
                   <div className="mt-2 space-y-1.5 text-sm text-muted-foreground">
                     <div className="flex items-center gap-2">
-                      <Phone size={14} className="shrink-0" />
-                      <span>{(client?.phone as string) ?? "—"}</span>
+                      <Phone size={14} className="shrink-0 text-muted-foreground" />
+                      <WhatsAppPhoneLink phone={client?.phone as string | undefined} />
                     </div>
                     <div className="flex items-center gap-2">
                       <Mail size={14} className="shrink-0" />

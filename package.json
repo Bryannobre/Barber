@@ -12,6 +12,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "seed:users": "node scripts/seed-users.mjs",
+    "seed:meire-reis": "node scripts/seed-meire-reis.mjs",
     "db:migrate": "node scripts/run-migrations.mjs",
     "db:push": "supabase db push",
     "db:setup": "node scripts/db-setup.mjs",

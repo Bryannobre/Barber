@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { WhatsAppPhoneLink } from "@/components/ui/WhatsAppPhoneLink";
 
 interface BookingSummaryProps {
   companyName?: string;
@@ -80,8 +81,9 @@ export function BookingSummary({
           </p>
         )}
         {clientPhone && (
-          <p>
-            <span className="text-muted-foreground">Número:</span> {clientPhone}
+          <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+            <span className="text-muted-foreground">Número:</span>
+            <WhatsAppPhoneLink phone={clientPhone} />
           </p>
         )}
         {date && (

@@ -14,6 +14,8 @@ import {
   CommandSeparator,
 } from "@/components/ui/command";
 import { globalSearchService } from "@/services/globalSearch.service";
+import { WhatsAppPhoneLink } from "@/components/ui/WhatsAppPhoneLink";
+import { canOpenWhatsApp } from "@/lib/whatsapp";
 
 interface GlobalSearchDialogProps {
   companyId: string;
@@ -82,9 +84,17 @@ export function GlobalSearchDialog({
                     onSelect={() => go("/app/clients")}
                   >
                     <Users className="mr-2 h-4 w-4 shrink-0 opacity-60" />
-                    <span className="truncate">
-                      {c.full_name}
-                      {c.phone ? ` · ${c.phone}` : ""}
+                    <span className="flex min-w-0 flex-col sm:flex-row sm:items-center sm:gap-2 truncate">
+                      <span className="truncate">{c.full_name}</span>
+                      {c.phone && canOpenWhatsApp(c.phone) ? (
+                        <WhatsAppPhoneLink
+                          phone={c.phone}
+                          className="text-xs shrink-0"
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      ) : c.phone ? (
+                        <span className="text-xs text-muted-foreground shrink-0">{c.phone}</span>
+                      ) : null}
                     </span>
                   </CommandItem>
                 ))}
@@ -104,10 +114,18 @@ export function GlobalSearchDialog({
                         onSelect={() => go(`/app/agenda?edit=${a.id}`)}
                       >
                         <Calendar className="mr-2 h-4 w-4 shrink-0 opacity-60" />
-                        <span className="truncate">
-                          {a.client_name ?? "Cliente"} — {dateLabel} {a.start_time} ·{" "}
-                          {a.professional_name} ·{" "}
-                          {STATUS_LABEL[a.status] ?? a.status}
+                        <span className="flex min-w-0 flex-col gap-0.5 truncate">
+                          <span className="truncate">
+                            {a.client_name ?? "Cliente"} — {dateLabel} {a.start_time} ·{" "}
+                            {a.professional_name} · {STATUS_LABEL[a.status] ?? a.status}
+                          </span>
+                          {a.client_phone && canOpenWhatsApp(a.client_phone) && (
+                            <WhatsAppPhoneLink
+                              phone={a.client_phone}
+                              className="text-xs w-fit"
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                          )}
                         </span>
                       </CommandItem>
                     );

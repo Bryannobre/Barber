@@ -2,6 +2,23 @@ import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Scissors } from "lucide-react";
 import type { Company } from "@/types/database.types";
+import type {
+  LandingBodySize,
+  LandingFontWeight,
+  LandingHeadingSize,
+  LandingLetterSpacing,
+  LandingTextAlign,
+  LandingTextTransform,
+} from "@/types/database.types";
+import {
+  bodySizeClass,
+  fontWeightClass,
+  headingSizeClass,
+  letterSpacingClass,
+  sectionTextContainerClass,
+  textTransformClass,
+} from "@/lib/landingTypography";
+import { cn } from "@/lib/utils";
 
 /** Imagem padrão em cores neutras quando nenhuma é configurada */
 const DEFAULT_HERO_IMAGE = "https://placehold.co/1920x1080/e5e7eb/9ca3af?text=Imagem+de+destaque";
@@ -15,9 +32,27 @@ interface SiteHeroProps {
   subtitle?: string | null;
   /** Imagem de fundo customizada */
   image?: string | null;
+  titleSize?: LandingHeadingSize | null;
+  titleWeight?: LandingFontWeight | null;
+  titleLetterSpacing?: LandingLetterSpacing | null;
+  titleTransform?: LandingTextTransform | null;
+  subtitleSize?: LandingBodySize | null;
+  textAlign?: LandingTextAlign | null;
 }
 
-export function SiteHero({ company, bookingUrl, title, subtitle, image }: SiteHeroProps) {
+export function SiteHero({
+  company,
+  bookingUrl,
+  title,
+  subtitle,
+  image,
+  titleSize,
+  titleWeight,
+  titleLetterSpacing,
+  titleTransform,
+  subtitleSize,
+  textAlign,
+}: SiteHeroProps) {
   const logoUrl = company.logo_url ?? company.logo;
   const heroTitle = title ?? company.name;
   const shortDescription =
@@ -36,7 +71,12 @@ export function SiteHero({ company, bookingUrl, title, subtitle, image }: SiteHe
       <div className="absolute inset-0 bg-background/70" />
 
       {/* Hero centralizado - logo, título, texto, botões */}
-      <div className="relative z-10 flex-1 flex flex-col items-center justify-center text-center px-6 py-20">
+      <div
+        className={cn(
+          "relative z-10 flex-1 flex flex-col justify-center px-6 py-20",
+          sectionTextContainerClass(textAlign)
+        )}
+      >
         {/* Logo centralizada (maior) */}
         <div className="mb-8">
           {logoUrl ? (
@@ -53,12 +93,25 @@ export function SiteHero({ company, bookingUrl, title, subtitle, image }: SiteHe
         </div>
 
         {/* Título principal */}
-        <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold text-foreground mb-4 tracking-tight">
-          {heroTitle.toUpperCase()}
+        <h1
+          className={cn(
+            "text-foreground mb-4",
+            headingSizeClass(titleSize),
+            fontWeightClass(titleWeight),
+            letterSpacingClass(titleLetterSpacing),
+            textTransformClass(titleTransform)
+          )}
+        >
+          {heroTitle}
         </h1>
 
         {/* Texto descritivo curto */}
-        <p className="text-lg md:text-xl text-foreground/90 max-w-2xl mx-auto mb-10 leading-relaxed">
+        <p
+          className={cn(
+            "text-foreground/90 max-w-2xl mb-10 leading-relaxed",
+            bodySizeClass(subtitleSize)
+          )}
+        >
           {shortDescription}
         </p>
 

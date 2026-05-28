@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import PageContainer from "@/components/shared/PageContainer";
+import { WhatsAppPhoneLink } from "@/components/ui/WhatsAppPhoneLink";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,26 +20,21 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { DEFAULT_BOOKING_SLOT_INTERVAL_MINUTES } from "@/lib/bookingDuration";
+import { CompanyBusinessHoursEditor } from "@/components/app/settings/CompanyBusinessHoursEditor";
+import { companyBusinessHoursService } from "@/services/companyBusinessHours.service";
+import {
+  createDefaultBusinessWeek,
+  rowsToDraftMap,
+  validateBusinessWeekDraft,
+  type CompanyBusinessHourDraft,
+} from "@/lib/businessHours";
 
-const DEFAULT_OPENING_TIME = "09:00";
-const DEFAULT_CLOSING_TIME = "19:00";
 const DEFAULT_PRIMARY_COLOR = "#6fcf97";
-
-function isMinuteStep(time: string, stepMinutes: number) {
-  const minutes = Number(time.split(":")[1] ?? "0");
-  return minutes % stepMinutes === 0;
-}
-
-function toMinutes(time: string) {
-  const [h, m] = time.split(":").map(Number);
-  return h * 60 + m;
-}
 
 const AppSettings = () => {
   const queryClient = useQueryClient();
   const { currentCompany, setCurrentCompany } = useTenant();
-  const [openingTime, setOpeningTime] = useState(DEFAULT_OPENING_TIME);
-  const [closingTime, setClosingTime] = useState(DEFAULT_CLOSING_TIME);
+  const [weekDrafts, setWeekDrafts] = useState<CompanyBusinessHourDraft[]>([]);
   const [customizationEnabled, setCustomizationEnabled] = useState(false);
   const [dashboardTheme, setDashboardTheme] = useState<"dark" | "light">("dark");
   const [dashboardPrimaryColor, setDashboardPrimaryColor] = useState(DEFAULT_PRIMARY_COLOR);
@@ -46,9 +42,20 @@ const AppSettings = () => {
     String(DEFAULT_BOOKING_SLOT_INTERVAL_MINUTES)
   );
 
+  const { data: businessHoursRows, isLoading: hoursLoading } = useQuery({
+    queryKey: ["company-business-hours", currentCompany?.id],
+    queryFn: async () => {
+      if (!currentCompany?.id) return [];
+      const { data, error } = await companyBusinessHoursService.listByCompany(
+        currentCompany.id
+      );
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!currentCompany?.id,
+  });
+
   useEffect(() => {
-    setOpeningTime((currentCompany?.opening_time ?? DEFAULT_OPENING_TIME).slice(0, 5));
-    setClosingTime((currentCompany?.closing_time ?? DEFAULT_CLOSING_TIME).slice(0, 5));
     setSlotInterval(
       String(
         currentCompany?.booking_slot_interval_minutes ??
@@ -60,6 +67,19 @@ const AppSettings = () => {
     setDashboardPrimaryColor(currentCompany?.dashboard_primary_color ?? DEFAULT_PRIMARY_COLOR);
   }, [currentCompany]);
 
+  useEffect(() => {
+    if (!currentCompany?.id) return;
+    if (businessHoursRows && businessHoursRows.length > 0) {
+      setWeekDrafts(rowsToDraftMap(businessHoursRows));
+    } else if (!hoursLoading) {
+      setWeekDrafts(
+        rowsToDraftMap(createDefaultBusinessWeek(currentCompany.id)).map((d) => ({
+          ...d,
+        }))
+      );
+    }
+  }, [businessHoursRows, currentCompany?.id, hoursLoading]);
+
   const saveBusinessHoursMutation = useMutation({
     mutationFn: async () => {
       if (!currentCompany) return;
@@ -69,21 +89,14 @@ const AppSettings = () => {
         throw new Error("Intervalo de agendamento inválido.");
       }
 
-      if (!isMinuteStep(openingTime, interval) || !isMinuteStep(closingTime, interval)) {
-        throw new Error(
-          `Abertura e fechamento devem usar múltiplos de ${interval} minutos (ex.: 09:00, 09:15).`
-        );
-      }
+      const validationError = validateBusinessWeekDraft(weekDrafts, interval);
+      if (validationError) throw new Error(validationError);
 
-      if (toMinutes(closingTime) <= toMinutes(openingTime)) {
-        throw new Error("O horário de fechamento deve ser maior que o de abertura.");
-      }
-
-      const { data, error } = await companyService.update(currentCompany.id, {
-        opening_time: openingTime,
-        closing_time: closingTime,
-        booking_slot_interval_minutes: interval,
-      });
+      const { data, error } = await companyBusinessHoursService.saveWeek(
+        currentCompany.id,
+        weekDrafts,
+        interval
+      );
       if (error) throw error;
       if (data) {
         setCurrentCompany(data);
@@ -95,9 +108,10 @@ const AppSettings = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["slots"] });
       queryClient.invalidateQueries({ queryKey: ["company-booking-settings"] });
+      queryClient.invalidateQueries({ queryKey: ["company-business-hours"] });
       queryClient.invalidateQueries({ queryKey: ["appointments"] });
       toast.success(
-        `Configuração salva. Agendamentos usarão intervalos de ${slotInterval} minutos.`
+        `Horários da empresa salvos. Intervalo de agendamento: ${slotInterval} minutos.`
       );
     },
     onError: (error) => {
@@ -220,7 +234,9 @@ const AppSettings = () => {
             </div>
             <div>
               <p className="text-xs text-muted-foreground">Telefone</p>
-              <p className="font-medium">{currentCompany?.phone ?? "—"}</p>
+              <p className="font-medium">
+                <WhatsAppPhoneLink phone={currentCompany?.phone} />
+              </p>
             </div>
             <div>
               <p className="text-xs text-muted-foreground">Email</p>
@@ -228,62 +244,33 @@ const AppSettings = () => {
             </div>
             <div>
               <p className="text-xs text-muted-foreground">Telefone do Responsável</p>
-              <p className="font-medium">{currentCompany?.owner_phone ?? "—"}</p>
+              <p className="font-medium">
+                <WhatsAppPhoneLink phone={currentCompany?.owner_phone} />
+              </p>
             </div>
           </div>
         </div>
 
         <div className="bg-card border border-border rounded-xl p-6 space-y-4">
-          <h3 className="font-semibold">Horário de Funcionamento</h3>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label>Abertura</Label>
-              <Input
-                type="time"
-                step={Number(slotInterval) * 60}
-                value={openingTime}
-                onChange={(e) => setOpeningTime(e.target.value)}
-                className="mt-1"
-              />
-            </div>
-            <div>
-              <Label>Fechamento</Label>
-              <Input
-                type="time"
-                step={Number(slotInterval) * 60}
-                value={closingTime}
-                onChange={(e) => setClosingTime(e.target.value)}
-                className="mt-1"
-              />
-            </div>
-          </div>
           <div>
-            <Label>Intervalo entre horários de agendamento</Label>
-            <Select value={slotInterval} onValueChange={setSlotInterval}>
-              <SelectTrigger className="mt-1 max-w-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="5">5 minutos (ex.: 09:00, 09:05…)</SelectItem>
-                <SelectItem value="10">10 minutos</SelectItem>
-                <SelectItem value="15">15 minutos (recomendado)</SelectItem>
-                <SelectItem value="30">30 minutos</SelectItem>
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground mt-1">
-              Define os horários que o cliente pode escolher na landing e no app.
+            <h3 className="font-semibold">Horário de funcionamento</h3>
+            <p className="text-sm text-muted-foreground mt-1">
+              Por dia da semana. A jornada de cada profissional deve ficar dentro desses horários.
             </p>
           </div>
-          <p className="text-xs text-muted-foreground">
-            Abertura e fechamento limitam a janela do dia; o intervalo define o passo entre cada
-            horário oferecido.
-          </p>
-          <Button
-            onClick={() => saveBusinessHoursMutation.mutate()}
-            disabled={!currentCompany || saveBusinessHoursMutation.isPending}
-          >
-            {saveBusinessHoursMutation.isPending ? "Salvando..." : "Salvar horários e intervalo"}
-          </Button>
+          {hoursLoading && weekDrafts.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Carregando horários…</p>
+          ) : (
+            <CompanyBusinessHoursEditor
+              drafts={weekDrafts}
+              slotInterval={slotInterval}
+              onDraftsChange={setWeekDrafts}
+              onSlotIntervalChange={setSlotInterval}
+              onSave={() => saveBusinessHoursMutation.mutate()}
+              isSaving={saveBusinessHoursMutation.isPending}
+              disabled={!currentCompany}
+            />
+          )}
         </div>
 
         <div className="bg-card border border-border rounded-xl p-6 space-y-4">

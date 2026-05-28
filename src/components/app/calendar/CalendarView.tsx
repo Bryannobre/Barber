@@ -21,6 +21,8 @@ interface CalendarViewProps {
   closingTime: string;
   /** Passo da grade e do clique (5, 10, 15 ou 30 min) */
   slotIntervalMinutes: number;
+  /** Empresa fechada neste dia (sem novos agendamentos) */
+  companyClosed?: boolean;
   pixelsPerMinute?: number;
   onEmptySlotClick: (payload: { professionalId: string; date: string; startTime: string }) => void;
   onEventClick: (appointmentId: string) => void;
@@ -43,6 +45,7 @@ export function CalendarView({
   openingTime,
   closingTime,
   slotIntervalMinutes,
+  companyClosed = false,
   pixelsPerMinute: pixelsPerMinuteProp,
   onEmptySlotClick,
   onEventClick,
@@ -84,6 +87,15 @@ export function CalendarView({
 
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+      {companyClosed && (
+        <div className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-3 text-center text-sm">
+          <span className="font-medium text-amber-900 dark:text-amber-100">Dia fechado</span>
+          <span className="text-muted-foreground">
+            {" "}
+            — sem novos agendamentos. Os existentes permanecem na grade.
+          </span>
+        </div>
+      )}
       <div
         className="scrollbar-theme overflow-x-auto overflow-y-auto overscroll-contain"
         style={{ maxHeight: "min(720px, calc(100vh - 220px))" }}
@@ -173,6 +185,7 @@ export function CalendarView({
                   timelinePadY={CALENDAR_TIMELINE_PAD_Y}
                   bodyHeight={bodyHeight}
                   clickRoundingMinutes={slotIntervalMinutes}
+                  allowNewBookings={!companyClosed}
                   onEmptyClick={(professionalId, startTime) =>
                     onEmptySlotClick({ professionalId, date: dateStr, startTime })
                   }

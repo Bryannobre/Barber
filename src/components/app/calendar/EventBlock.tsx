@@ -57,7 +57,7 @@ export function EventBlock({
         statusClass
       )}
       style={{ top, height }}
-      title={`${appointment.client_name ?? "Cliente"} · ${professionalName} · ${timeLabel}`}
+      title={`${appointment.client_name ?? "Cliente"}${appointment.client_phone ? ` · ${appointment.client_phone}` : ""} · ${professionalName} · ${timeLabel}`}
       onClick={() => onClick(appointment.id)}
     >
       <p className="truncate text-xs font-semibold">{appointment.client_name ?? "Cliente"}</p>

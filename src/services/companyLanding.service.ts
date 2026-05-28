@@ -1,6 +1,15 @@
 import { supabase } from "@/lib/supabase";
 import { requireCompanyId } from "@/lib/companyScope";
-import type { CompanyLandingSettings, AboutTitleAccent } from "@/types/database.types";
+import type {
+  CompanyLandingSettings,
+  AboutTitleAccent,
+  LandingBodySize,
+  LandingFontWeight,
+  LandingHeadingSize,
+  LandingLetterSpacing,
+  LandingTextAlign,
+  LandingTextTransform,
+} from "@/types/database.types";
 
 export interface LandingSettingsInput {
   hero_title?: string | null;
@@ -24,6 +33,19 @@ export interface LandingSettingsInput {
   gallery_image_8_url?: string | null;
   cta_text?: string | null;
   cta_button_text?: string | null;
+  hero_text_align?: LandingTextAlign | null;
+  hero_title_size?: LandingHeadingSize | null;
+  hero_title_weight?: LandingFontWeight | null;
+  hero_title_letter_spacing?: LandingLetterSpacing | null;
+  hero_title_transform?: LandingTextTransform | null;
+  hero_subtitle_size?: LandingBodySize | null;
+  about_text_align?: LandingTextAlign | null;
+  about_title_size?: LandingHeadingSize | null;
+  about_body_size?: LandingBodySize | null;
+  cta_text_align?: LandingTextAlign | null;
+  cta_title_size?: LandingHeadingSize | null;
+  cta_body_size?: LandingBodySize | null;
+  cta_button_text_size?: LandingBodySize | null;
   primary_color?: string | null;
   secondary_color?: string | null;
 }
@@ -64,6 +86,19 @@ export const companyLandingService = {
       gallery_image_8_url: input.gallery_image_8_url ?? null,
       cta_text: input.cta_text ?? null,
       cta_button_text: input.cta_button_text ?? null,
+      hero_text_align: input.hero_text_align ?? null,
+      hero_title_size: input.hero_title_size ?? null,
+      hero_title_weight: input.hero_title_weight ?? null,
+      hero_title_letter_spacing: input.hero_title_letter_spacing ?? null,
+      hero_title_transform: input.hero_title_transform ?? null,
+      hero_subtitle_size: input.hero_subtitle_size ?? null,
+      about_text_align: input.about_text_align ?? null,
+      about_title_size: input.about_title_size ?? null,
+      about_body_size: input.about_body_size ?? null,
+      cta_text_align: input.cta_text_align ?? null,
+      cta_title_size: input.cta_title_size ?? null,
+      cta_body_size: input.cta_body_size ?? null,
+      cta_button_text_size: input.cta_button_text_size ?? null,
       primary_color: input.primary_color ?? null,
       secondary_color: input.secondary_color ?? null,
       updated_at: new Date().toISOString(),

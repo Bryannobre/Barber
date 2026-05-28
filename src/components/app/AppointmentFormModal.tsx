@@ -25,6 +25,8 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Trash2, CheckCircle } from "lucide-react";
 import { maskPhone } from "@/lib/masks";
+import { WhatsAppPhoneLink } from "@/components/ui/WhatsAppPhoneLink";
+import { canOpenWhatsApp } from "@/lib/whatsapp";
 import { setHours, setMinutes } from "date-fns";
 import type { Appointment, ProfessionalWithServices, Service } from "@/types/database.types";
 import type { CompanyClientWithVisitCount } from "@/services/client.service";
@@ -401,6 +403,15 @@ export function AppointmentFormModal({
     return slot < new Date();
   };
 
+  const resolvedClientPhone = useMemo(() => {
+    if (values.client_phone?.trim()) return values.client_phone.trim();
+    if (clientSelectValue && clientSelectValue !== "__other__") {
+      const c = clients.find((x) => x.id === clientSelectValue);
+      return c?.phone?.trim() ?? "";
+    }
+    return "";
+  }, [values.client_phone, clientSelectValue, clients]);
+
   const isSelectedProfessionalBusy = () => {
     if (!values.professional_id || !values.date || !values.start_time) return false;
     return !!getProfessionalBusyUntil(
@@ -465,6 +476,17 @@ export function AppointmentFormModal({
               <p className="text-xs text-muted-foreground">
                 Nenhum cliente cadastrado. Cadastre na aba Clientes ou use &quot;Outro&quot; para informar manualmente.
               </p>
+            )}
+            {canOpenWhatsApp(resolvedClientPhone) && (
+              <WhatsAppPhoneLink
+                phone={resolvedClientPhone}
+                className="text-sm"
+                message={
+                  values.date && values.start_time
+                    ? `Olá! Sobre seu agendamento em ${values.date} às ${String(values.start_time).slice(0, 5)}.`
+                    : "Olá! Sobre seu agendamento conosco."
+                }
+              />
             )}
           </div>
 
@@ -535,6 +557,15 @@ export function AppointmentFormModal({
                 </p>
               ) : null;
             })()}
+            {selectedProfessional?.phone && (
+              <WhatsAppPhoneLink
+                phone={selectedProfessional.phone}
+                className="text-sm mt-1.5"
+                message="Olá! Preciso falar sobre um agendamento."
+              >
+                WhatsApp de {selectedProfessional.name}
+              </WhatsAppPhoneLink>
+            )}
           </div>
 
           {/* Serviços (pode escolher mais de um) */}

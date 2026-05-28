@@ -1,5 +1,11 @@
 export type UserRole = 'owner' | 'company_admin' | 'employee' | 'client';
 export type AppointmentStatus = 'pending' | 'confirmed' | 'completed' | 'cancelled' | 'blocked' | 'no_show';
+export type LandingTextAlign = "left" | "center" | "right";
+export type LandingHeadingSize = "md" | "lg" | "xl";
+export type LandingBodySize = "sm" | "md" | "lg";
+export type LandingFontWeight = "normal" | "medium" | "semibold" | "bold";
+export type LandingLetterSpacing = "normal" | "wide" | "wider";
+export type LandingTextTransform = "none" | "uppercase" | "capitalize";
 
 /** Onde aplicar cor de destaque no título da seção Sobre */
 export type AboutTitleAccent = "first_word" | "last_word" | "all" | "none";
@@ -30,8 +36,32 @@ export interface CompanyLandingSettings {
   gallery_image_8_url: string | null;
   cta_text: string | null;
   cta_button_text: string | null;
+  hero_text_align: LandingTextAlign | null;
+  hero_title_size: LandingHeadingSize | null;
+  hero_title_weight: LandingFontWeight | null;
+  hero_title_letter_spacing: LandingLetterSpacing | null;
+  hero_title_transform: LandingTextTransform | null;
+  hero_subtitle_size: LandingBodySize | null;
+  about_text_align: LandingTextAlign | null;
+  about_title_size: LandingHeadingSize | null;
+  about_body_size: LandingBodySize | null;
+  cta_text_align: LandingTextAlign | null;
+  cta_title_size: LandingHeadingSize | null;
+  cta_body_size: LandingBodySize | null;
+  cta_button_text_size: LandingBodySize | null;
   primary_color: string | null;
   secondary_color: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CompanyBusinessHour {
+  id: string;
+  company_id: string;
+  day_of_week: number;
+  is_closed: boolean;
+  opens_at: string | null;
+  closes_at: string | null;
   created_at: string;
   updated_at: string;
 }

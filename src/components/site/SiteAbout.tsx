@@ -2,7 +2,11 @@ import type React from "react";
 import { Button } from "@/components/ui/button";
 import { Play } from "lucide-react";
 import type { Company } from "@/types/database.types";
+import { WhatsAppPhoneLink } from "@/components/ui/WhatsAppPhoneLink";
 import type { AboutTitleAccent } from "@/types/database.types";
+import type { LandingBodySize, LandingHeadingSize, LandingTextAlign } from "@/types/database.types";
+import { bodySizeClass, headingSizeClass } from "@/lib/landingTypography";
+import { cn } from "@/lib/utils";
 
 /** Imagens padrão em cores neutras para seção Sobre */
 const ABOUT_GALLERY_DEFAULT = [
@@ -22,6 +26,9 @@ interface SiteAboutProps {
   titleAccent?: AboutTitleAccent | null;
   /** Imagens nas 4 posições (fallback: ABOUT_GALLERY_DEFAULT) */
   images?: (string | null)[];
+  textAlign?: LandingTextAlign | null;
+  titleSize?: LandingHeadingSize | null;
+  bodySize?: LandingBodySize | null;
 }
 
 function renderTitleWithAccent(
@@ -63,7 +70,12 @@ export function SiteAbout({
   title,
   titleAccent,
   images,
+  textAlign,
+  titleSize,
+  bodySize,
 }: SiteAboutProps) {
+  const textAlignClass =
+    textAlign === "left" ? "text-left" : textAlign === "right" ? "text-right" : "text-center";
   const smallTitle = company.name.toUpperCase();
   const defaultTitle = company.slogan ?? "Seu estilo, nossa arte";
   const largeTitle = title ?? defaultTitle;
@@ -130,19 +142,24 @@ export function SiteAbout({
           />
           <div className="absolute inset-0 bg-gradient-to-br from-card/95 via-card/90 to-muted/95" />
 
-          <div className="relative z-10 p-8 md:p-10 lg:p-12">
+          <div className={cn("relative z-10 p-8 md:p-10 lg:p-12", textAlignClass)}>
             {/* Título pequeno - nome da empresa */}
             <p className="text-sm font-semibold tracking-[0.2em] text-foreground/80 uppercase mb-3">
               {smallTitle}
             </p>
 
             {/* Frase de efeito - título grande */}
-            <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold text-foreground leading-tight mb-6">
+            <h2
+              className={cn(
+                "font-bold text-foreground leading-tight mb-6",
+                headingSizeClass(titleSize)
+              )}
+            >
               {renderTitleWithAccent(largeTitle, titleAccent)}
             </h2>
 
             {/* Texto explicativo */}
-            <p className="text-base md:text-lg text-foreground/90 leading-relaxed mb-8">
+            <p className={cn("text-foreground/90 leading-relaxed mb-8", bodySizeClass(bodySize))}>
               {description}
             </p>
 
@@ -158,6 +175,12 @@ export function SiteAbout({
                 <p className="font-semibold text-primary">
                   {ownerName}, {ownerRole}
                 </p>
+                {company.owner_phone && (
+                  <WhatsAppPhoneLink
+                    phone={company.owner_phone}
+                    className="text-sm mt-2"
+                  />
+                )}
               </div>
             </div>
 

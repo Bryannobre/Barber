@@ -1,5 +1,6 @@
 import type { Appointment, Professional } from "@/types/database.types";
 import type { MouseEvent } from "react";
+import { cn } from "@/lib/utils";
 import { EventBlock } from "./EventBlock";
 import {
   CALENDAR_HEADER_HEIGHT_PX,
@@ -17,6 +18,7 @@ interface ProfessionalColumnProps {
   bodyHeight: number;
   /** Alinha clique na grade ao intervalo configurado na empresa */
   clickRoundingMinutes: number;
+  allowNewBookings?: boolean;
   onEmptyClick: (professionalId: string, startTime: string) => void;
   onEventClick: (appointmentId: string) => void;
 }
@@ -30,10 +32,12 @@ export function ProfessionalColumn({
   timelinePadY,
   bodyHeight,
   clickRoundingMinutes,
+  allowNewBookings = true,
   onEmptyClick,
   onEventClick,
 }: ProfessionalColumnProps) {
   const handleEmptyClick = (event: MouseEvent<HTMLDivElement>) => {
+    if (!allowNewBookings) return;
     const rect = event.currentTarget.getBoundingClientRect();
     const relativeY = event.clientY - rect.top - timelinePadY;
     const clickedMinutesFromStart = Math.max(0, Math.floor(relativeY / pixelsPerMinute));
@@ -54,7 +58,10 @@ export function ProfessionalColumn({
         <span className="truncate">{professional.name}</span>
       </div>
       <div
-        className="relative cursor-pointer bg-background/40"
+        className={cn(
+          "relative bg-background/40",
+          allowNewBookings ? "cursor-pointer" : "cursor-default opacity-90"
+        )}
         style={{ height: bodyHeight }}
         onClick={handleEmptyClick}
       >
